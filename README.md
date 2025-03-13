@@ -1,2 +1,2 @@
 # WebGLSampleApp
-Small app for WebGL
+Pet project for WebGL. Imitates ShaderToy

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Shader Editor Layout</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #viewport {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #glcanvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        #editor {
+            width: 300px;
+            background-color: #222;
+            color: #eee;
+            font-family: monospace;
+            padding: 10px;
+            box-sizing: border-box;
+            resize: horizontal;
+            overflow: auto;
+        }
+    </style>
+</head>
+<body>
+    <div id="viewport">
+        <canvas id="glcanvas"></canvas>
+    </div>
+    <textarea id="editor">
+        // Your shader code goes here
+        void mainImage( out vec4 fragColor, in vec2 fragCoord )
+        {
+            vec2 uv = fragCoord/iResolution.xy;
+            fragColor = vec4(uv,0.5+0.5*sin(iTime),1.0);
+        }
+    </textarea>
+    <script src="../scripts/main.js"></script>
+</body>
+</html>
