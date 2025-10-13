@@ -1,0 +1,20 @@
+# Dependencies
+/node_modules
+
+# Build output
+/dist
+/build
+
+# IDE and editor configuration
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Log files
+*.log
+
+# OS-generated files
+.DS_Store

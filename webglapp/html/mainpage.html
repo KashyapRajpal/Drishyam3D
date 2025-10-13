@@ -1,21 +1,64 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>Shader Editor Layout</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drishyam3D</title>
+    <!-- CodeMirror CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/theme/dracula.min.css">
+    <!-- End CodeMirror CSS -->
+
     <style>
         body {
             margin: 0;
+            background-color: #1a1a1a;
+            color: #ddd;
+            font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
             display: flex;
+            flex-direction: column;
             height: 100vh;
+            overflow: hidden;
+        }
+
+        #main-header {
+            background-color: #252526;
+            padding: 0 20px;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            border-bottom: 1px solid #444;
+            flex-shrink: 0;
+        }
+
+        #main-header h1 {
+            font-size: 1.2em;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        #content-wrapper {
+            display: flex;
+            flex: 1;
             overflow: hidden;
         }
 
         #viewport {
             flex: 1;
             display: flex;
-            align-items: center;
-            justify-content: center;
+            min-width: 0; /* Prevents flexbox overflow issues */
+        }
+
+        #editor-panel {
+            display: flex;
+            flex-direction: column;
+            width: 450px;
+            min-width: 300px;
+            max-width: 50%;
+            background-color: #252526;
+            resize: horizontal;
+            overflow: auto;
+            border-left: 1px solid #444;
         }
 
         #glcanvas {
@@ -24,30 +67,159 @@
             display: block;
         }
 
+        #editor-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 12px;
+            background-color: #3c3c3c;
+            color: #cccccc;
+            font-size: 0.9em;
+            user-select: none;
+            height: 35px;
+        }
+
+        .editor-tabs {
+            display: flex;
+            height: 100%;
+        }
+
+        .tab {
+            padding: 0 15px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            border-bottom: 2px solid transparent;
+        }
+
+        .tab.active {
+            background-color: #252526;
+            color: #fff;
+            border-bottom-color: #0e639c;
+        }
+
         #editor {
-            width: 300px;
-            background-color: #222;
+            flex: 1;
+            background-color: #1e1e1e;
+            display: none; /* Hide textareas by default */
             color: #eee;
             font-family: monospace;
+            font-size: 14px;
+            line-height: 1.5;
             padding: 10px;
             box-sizing: border-box;
-            resize: horizontal;
-            overflow: auto;
+            border: none;
+            resize: none; /* Resizing is now on the parent panel */
+            outline: none;
+        }
+        
+        /* CodeMirror styling overrides */
+        .CodeMirror {
+            flex: 1;
+            display: none; /* Hide CM instances by default */
+        }
+        .CodeMirror.active {
+            display: block; /* Show the active one */
+            font-size: 14px;
+            line-height: 1.5;
+            height: auto; /* Let flexbox handle the height */
+        }
+
+        .CodeMirror-gutters {
+            background-color: #1e1e1e !important;
+            border-right: 1px solid #333 !important;
+        }
+
+        #editor-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            background-color: #3c3c3c;
+            border-top: 1px solid #1e1e1e;
+            flex-shrink: 0;
+        }
+
+        #reload-button {
+            background-color: #0e639c;
+            color: white;
+            border: none;
+            padding: 6px 16px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 0.9em;
+            font-weight: 600;
+            transition: background-color 0.3s ease;
+        }
+
+        #reload-button:hover {
+            background-color: #157dc5;
+        }
+
+        #error-console {
+            background-color: #431616;
+            color: #f7a7a7;
+            padding: 8px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 13px;
+            display: none; /* Hidden by default */
+            flex-grow: 1;
+            margin-right: 12px;
         }
     </style>
 </head>
 <body>
-    <div id="viewport">
-        <canvas id="glcanvas"></canvas>
-    </div>
-    <textarea id="editor">
-        // Your shader code goes here
-        void mainImage( out vec4 fragColor, in vec2 fragCoord )
-        {
-            vec2 uv = fragCoord/iResolution.xy;
-            fragColor = vec4(uv,0.5+0.5*sin(iTime),1.0);
-        }
-    </textarea>
+    <header id="main-header">
+        <h1>Drishyam3D</h1>
+    </header>
+    <main id="content-wrapper">
+        <div id="viewport">
+            <canvas id="glcanvas"></canvas>
+        </div>
+        <div id="editor-panel">
+            <div id="editor-header">
+                <div class="editor-tabs">
+                    <div class="tab active" data-editor="shader">Fragment Shader</div>
+                    <div class="tab" data-editor="script">Scene Script (JS)</div>
+                </div>
+            </div>
+            <textarea id="editor">precision highp float;
+varying highp vec3 vLighting;
+
+void main(void) {
+    gl_FragColor = vec4(0.5, 0.5, 1.0, 1.0) * vec4(vLighting, 1.0);
+}
+            </textarea>
+            <textarea id="script-editor">
+// The 'state' object is passed from the main application.
+// 'state' contains: modelViewMatrix, projectionMatrix
+// 'deltaTime' is the time in seconds since the last frame.
+
+function init(state) {
+    // This function is called once when the script is loaded.
+    state.cubeRotation = 0.0;
+}
+
+function update(state, deltaTime) {
+    // This function is called on every frame.
+    translateMatrix(state.modelViewMatrix, [-0.0, 0.0, -6.0]);
+    rotateMatrix(state.modelViewMatrix, state.cubeRotation, [0, 1, 0]);
+    state.cubeRotation += deltaTime * 0.5;
+}
+            </textarea>
+            <div id="editor-footer">
+                <div id="error-console"></div>
+                <button id="reload-button">Run</button>
+            </div>
+        </div>
+    </main>
+    <!-- CodeMirror JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/clike/clike.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/javascript/javascript.min.js"></script>
+    <!-- End CodeMirror JS -->
+
     <script src="../scripts/main.js"></script>
 </body>
 </html>
