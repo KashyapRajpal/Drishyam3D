@@ -14,16 +14,18 @@ Drishyam3D is a lightweight, browser-based 3D scene editor built with WebGL. It 
 
 ## How to Run
 
-This project is a client-side application and does not require a complex build process.
+This project uses modern JavaScript modules (`import`/`export`), which have specific security requirements in web browsers. Therefore, **you must run it using a local web server.** Opening the `mainpage.html` file directly from your filesystem (`file:///...`) will not work.
+
+**Why is a server required?**
+Modern browsers enforce a security feature called Cross-Origin Resource Sharing (CORS). When you use JavaScript modules, the browser blocks them from loading if you open the HTML file directly from your local disk (`file:///`). A local server provides the necessary `http://` protocol, which gives your project a valid "origin" and allows the modules to load correctly.
+
+**Steps to run:**
 
 1.  Clone the repository.
-2.  Open the `webglapp/html/mainpage.html` file in a modern web browser (like Chrome, Firefox, or Edge).
+2.  Open your terminal, navigate to the project's root directory, and start a simple web server. If you have Python 3, you can use:
 
-For the best experience and to avoid potential browser security restrictions (especially when loading external files in the future), it's recommended to use a simple local web server:
+    ```bash
+    python -m http.server
+    ```
 
-```bash
-# If you have Python 3 installed:
-python -m http.server
-
-# Then navigate to http://localhost:8000/webglapp/html/mainpage.html
-```
+3.  Open your web browser and navigate to: `http://localhost:8000/drishyam3D/html/mainpage.html`
