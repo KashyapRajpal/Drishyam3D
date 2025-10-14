@@ -1,5 +1,4 @@
 import { createIdentityMatrix, createPerspectiveMatrix } from './matrix.js';
-import { initCubeBuffers } from './geometry.js';
 
 function resizeCanvas(canvas) {
     const displayWidth  = canvas.clientWidth;
@@ -12,8 +11,8 @@ function resizeCanvas(canvas) {
 }
 
 export function createScene(gl, canvas) {
-    const buffers = initCubeBuffers(gl);
-    
+    let drawable = null; // Will hold { buffers, vertexCount }
+
     let programInfo = null;
     let userScript = {
         init: () => {},
@@ -32,7 +31,7 @@ export function createScene(gl, canvas) {
         const deltaTime = now - then;
         then = now;
 
-        if (!programInfo) {
+        if (!programInfo || !drawable) {
             requestAnimationFrame(render);
             return;
         }
@@ -64,7 +63,7 @@ export function createScene(gl, canvas) {
             const normalize = false;
             const stride = 0;
             const offset = 0;
-            gl.bindBuffer(gl.ARRAY_BUFFER, buffers.position);
+            gl.bindBuffer(gl.ARRAY_BUFFER, drawable.buffers.position);
             gl.vertexAttribPointer(
                 programInfo.attribLocations.vertexPosition,
                 numComponents, type, normalize, stride, offset);
@@ -78,21 +77,21 @@ export function createScene(gl, canvas) {
             const normalize = false;
             const stride = 0;
             const offset = 0;
-            gl.bindBuffer(gl.ARRAY_BUFFER, buffers.normal);
+            gl.bindBuffer(gl.ARRAY_BUFFER, drawable.buffers.normal);
             gl.vertexAttribPointer(
                 programInfo.attribLocations.vertexNormal,
                 numComponents, type, normalize, stride, offset);
             gl.enableVertexAttribArray(programInfo.attribLocations.vertexNormal);
         }
 
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.indices);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, drawable.buffers.indices);
         gl.useProgram(programInfo.program);
 
         gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projectionMatrix);
         gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, modelViewMatrix);
 
         {
-            const vertexCount = 36;
+            const vertexCount = drawable.vertexCount;
             const type = gl.UNSIGNED_SHORT;
             const offset = 0;
             gl.drawElements(gl.TRIANGLES, vertexCount, type, offset);
@@ -112,6 +111,9 @@ export function createScene(gl, canvas) {
         updateUserScript: (newUserScript) => {
             userScript = newUserScript;
             userScript.init(sceneState);
+        },
+        loadGeometry: (newDrawable) => {
+            drawable = newDrawable;
         }
     };
 }

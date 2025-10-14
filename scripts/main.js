@@ -4,6 +4,8 @@ import {
 } from './matrix.js';
 import { initShaderProgram } from './webgl-helpers.js';
 import { setupEditors } from './editor.js';
+import { initCubeBuffers } from './geometry.js';
+import { parseGltf } from './gltf-parser.js';
 import { setupExplorer } from './explorer.js';
 import { createScene } from './scene.js';
 
@@ -41,6 +43,37 @@ window.onload = function() {
 
     const explorer = setupExplorer((fileId, fileName, fileType, readOnly, path) => editorManager.openEditor(fileId, fileName, fileType, readOnly, path));
 
+    // --- Model Importer Logic ---
+    const importModelBtn = document.querySelector('#import-model-btn');
+    const modelFileInput = document.querySelector('#model-file-input');
+
+    importModelBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        modelFileInput.click();
+    });
+
+    modelFileInput.addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const arrayBuffer = e.target.result;
+                const drawable = await parseGltf(gl, arrayBuffer);
+                scene.loadGeometry(drawable);
+            } catch (error) {
+                console.error("Failed to load GLTF model:", error);
+                errorConsole.textContent = `GLTF Error: ${error.message}`;
+                errorConsole.style.display = 'block';
+            }
+        };
+        reader.onerror = () => {
+            console.error("Failed to read file:", reader.error);
+        };
+        reader.readAsArrayBuffer(file);
+    });
+
     // Check if WebGL is available
     if (!gl) {
         alert("Unable to initialize WebGL. Your browser may not support it.");
@@ -48,6 +81,10 @@ window.onload = function() {
     }
     
     const scene = createScene(gl, canvas);
+    // Load the initial cube geometry into the scene
+    const cubeGeometry = { buffers: initCubeBuffers(gl), vertexCount: 36 };
+    scene.loadGeometry(cubeGeometry);
+
     function updateShader() {
         const vsEditor = editorManager.getEditor('vertex');
         const fsEditor = editorManager.getEditor('fragment');

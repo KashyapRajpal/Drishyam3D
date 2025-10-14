@@ -37,6 +37,41 @@
             margin: 0;
         }
 
+        /* File Menu Styles */
+        #file-menu-container {
+            position: relative;
+            display: inline-block;
+            margin-right: 20px;
+        }
+        .menu-item {
+            padding: 6px 12px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        .menu-item:hover {
+            background-color: #3c3c3c;
+        }
+        .dropdown-content {
+            display: none;
+            position: absolute;
+            background-color: #252526;
+            min-width: 160px;
+            box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+            z-index: 100;
+            border: 1px solid #444;
+        }
+        .dropdown-content a {
+            color: #ddd;
+            padding: 10px 14px;
+            text-decoration: none;
+            display: block;
+            font-size: 0.9em;
+        }
+        .dropdown-content a:hover { background-color: #3c3c3c; }
+        #file-menu-container:hover .dropdown-content {
+            display: block;
+        }
+
         #content-wrapper {
             display: flex;
             flex: 1;
@@ -260,6 +295,13 @@
 <body>
     <header id="main-header">
         <h1>Drishyam3D</h1>
+        <div id="file-menu-container">
+            <div class="menu-item">File</div>
+            <div class="dropdown-content">
+                <a href="#" id="import-model-btn">Import Model...</a>
+            </div>
+        </div>
+        <input type="file" id="model-file-input" style="display: none;" accept=".gltf,.glb">
     </header>
     <main id="content-wrapper">
         <div id="explorer-panel">
@@ -387,6 +429,9 @@ export function setupExplorer(onFileOpen) {
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/javascript/javascript.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/edit/closebrackets.min.js"></script>
     <!-- End CodeMirror JS -->
+
+    <!-- GLTF Loader -->
+    <script src="https://unpkg.com/gltf-loader-ts@1.0.3/dist/gltf-loader.js"></script>
 
     <script type="module" src="../scripts/main.js"></script>
 </body>
