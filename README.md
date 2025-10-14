@@ -28,4 +28,4 @@ Modern browsers enforce a security feature called Cross-Origin Resource Sharing 
     python -m http.server
     ```
 
-3.  Open your web browser and navigate to: `http://localhost:8000/drishyam3D/html/mainpage.html`
+3.  Open your web browser and navigate to: `http://localhost:8000/html/mainpage.html`

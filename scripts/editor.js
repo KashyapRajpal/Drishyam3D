@@ -1,57 +1,169 @@
 /**
  * Initializes the CodeMirror editors and sets up UI event listeners.
  * @param {function} onRun - The callback function to execute when the "Run" button is clicked.
- * @returns {object} An object containing the shader and script editor instances.
- * @returns {object} An object containing the vertex, fragment, and script editor instances.
+ * @param {function} onEditorChange - The callback function to execute when any editor content changes.
  */
-export function setupEditors(onRun) {
-    const vertexEditorTextArea = document.querySelector("#vertex-editor");
-    const fragmentEditorTextArea = document.querySelector("#fragment-editor");
-    const scriptEditorTextArea = document.querySelector("#script-editor");
+export function setupEditors(onRun, onEditorChange) {
+    const editorTabsContainer = document.querySelector('.editor-tabs');
+    const openEditors = {}; // Stores { id: { editor, tabEl } }
+    const readOnlyBanner = document.querySelector('#readonly-warning-banner');
+    let activeEditorId = null;
 
-    const vertexShaderEditor = CodeMirror.fromTextArea(vertexEditorTextArea, {
-        lineNumbers: true,
-        mode: "x-shader/x-vertex",
-        theme: "dracula",
-        lineWrapping: true,
-    });
+    function switchToTab(fileId) {
+        if (!openEditors[fileId] || activeEditorId === fileId) {
+            return;
+        }
 
-    const fragmentShaderEditor = CodeMirror.fromTextArea(fragmentEditorTextArea, {
-        lineNumbers: true,
-        mode: "x-shader/x-vertex",
-        theme: "dracula",
-        lineWrapping: true,
-    });
+        // Deactivate current tab
+        if (activeEditorId && openEditors[activeEditorId]) {
+            openEditors[activeEditorId].tabEl.classList.remove('active');
+            openEditors[activeEditorId].editor.getWrapperElement().classList.remove('active');
+        }
 
-    const scriptEditor = CodeMirror.fromTextArea(scriptEditorTextArea, {
-        lineNumbers: true,
-        mode: "javascript",
-        theme: "dracula",
-        lineWrapping: true,
-    });
+        // Activate new tab
+        const newEditor = openEditors[fileId];
+        newEditor.tabEl.classList.add('active');
+        newEditor.editor.getWrapperElement().classList.add('active');
+        newEditor.editor.refresh();
 
-    // --- Tab Switching Logic ---
-    const editors = {
-        vertex: vertexShaderEditor,
-        fragment: fragmentShaderEditor,
-        script: scriptEditor,
-    };
-    document.querySelectorAll('.tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-            document.querySelector('.tab.active').classList.remove('active');
-            tab.classList.add('active');
-            const activeEditor = tab.dataset.editor;
-            Object.keys(editors).forEach(key => {
-                editors[key].getWrapperElement().classList.toggle('active', key === activeEditor);
-            });
-            editors[activeEditor].refresh();
+        // Show or hide the read-only banner
+        readOnlyBanner.style.display = newEditor.readOnly ? 'block' : 'none';
+
+        activeEditorId = fileId;
+    }
+
+    function closeEditor(fileIdToClose, event) {
+        event.stopPropagation(); // Prevent tab switching when clicking the close button
+
+        if (!openEditors[fileIdToClose]) return;
+
+        let nextActiveId = null;
+        // If we are closing the active tab, we need to find a new one to activate
+        if (activeEditorId === fileIdToClose) {
+            const tabIds = Object.keys(openEditors);
+            const currentIndex = tabIds.indexOf(fileIdToClose);
+
+            if (tabIds.length > 1) {
+                // Prefer activating the tab to the left, otherwise the one to the right
+                if (currentIndex > 0) {
+                    nextActiveId = tabIds[currentIndex - 1];
+                } else {
+                    nextActiveId = tabIds[currentIndex + 1]; // The one that will become the first tab
+                }
+            }
+        }
+
+        // Remove the editor and its tab
+        const { editor, tabEl } = openEditors[fileIdToClose];
+        editor.getWrapperElement().remove();
+        tabEl.remove();
+        delete openEditors[fileIdToClose];
+
+        // Activate the next tab if necessary
+        if (nextActiveId) {
+            activeEditorId = null; // Force switchToTab to activate the new tab
+            switchToTab(nextActiveId);
+        } else if (Object.keys(openEditors).length === 0) {
+            // No tabs left
+            activeEditorId = null;
+        }
+    }
+
+    function openEditor(fileId, fileName, fileType, readOnly = false, path = null) {
+        if (openEditors[fileId]) {
+            switchToTab(fileId);
+            return;
+        }
+
+        const textArea = document.querySelector(`#${fileId}-editor`);
+
+        if (!textArea) {
+            console.error(`Textarea with id #${fileId}-editor not found.`);
+            return;
+        }
+
+        // Create a new tab element
+        const tabEl = document.createElement('div');
+        tabEl.className = 'tab';
+        tabEl.dataset.fileId = fileId;
+        tabEl.addEventListener('click', () => switchToTab(fileId));
+        if (readOnly) {
+            tabEl.classList.add('read-only');
+        }
+
+        const tabTitle = document.createElement('span');
+        tabTitle.textContent = fileName;
+        tabEl.appendChild(tabTitle);
+
+        const closeBtn = document.createElement('span');
+        closeBtn.className = 'tab-close-btn';
+        closeBtn.textContent = 'x';
+        closeBtn.addEventListener('click', (event) => closeEditor(fileId, event));
+        tabEl.appendChild(closeBtn);
+        editorTabsContainer.appendChild(tabEl);
+
+        // Create a new CodeMirror instance
+        const editor = CodeMirror.fromTextArea(textArea, {
+            lineNumbers: true,
+            mode: fileType,
+            theme: "dracula",
+            lineWrapping: true,
+            autoCloseBrackets: true,
+            readOnly: readOnly,
         });
-    });
-    fragmentShaderEditor.getWrapperElement().classList.add('active'); // Show fragment shader editor by default
+
+        // Add dirty indicator logic for editable files
+        if (!readOnly) {
+            editor.on('change', () => {
+                if (!openEditors[fileId].isDirty) {
+                    openEditors[fileId].isDirty = true;
+                    tabEl.classList.add('dirty');
+                }
+                if (onEditorChange) {
+                    onEditorChange();
+                }
+            });
+        }
+
+        openEditors[fileId] = { editor, tabEl, readOnly };
+        switchToTab(fileId);
+    }
 
     // --- Run Button Logic ---
     const reloadButton = document.querySelector("#reload-button");
     reloadButton.addEventListener("click", onRun);
 
-    return { vertexShaderEditor, fragmentShaderEditor, scriptEditor };
+    return {
+        openEditor,
+        /**
+         * Gets the CodeMirror instance for a given file ID.
+         * @param {string} fileId - The ID of the file (e.g., 'vertex', 'fragment').
+         * @returns {CodeMirror.Editor|null}
+         */
+        getEditor: (fileId) => {
+            return openEditors[fileId] ? openEditors[fileId].editor : null;
+        },
+        /**
+         * Gets all currently open editor instances.
+         * @returns {Object.<string, CodeMirror.Editor>}
+         */
+        getAllEditors: () => {
+            const editors = {};
+            for (const fileId in openEditors) {
+                editors[fileId] = openEditors[fileId].editor;
+            }
+            return editors;
+        },
+        /**
+         * Clears the dirty state from all editable tabs.
+         */
+        clearAllDirtyStates: () => {
+            for (const fileId in openEditors) {
+                if (openEditors[fileId].isDirty) {
+                    openEditors[fileId].isDirty = false;
+                    openEditors[fileId].tabEl.classList.remove('dirty');
+                }
+            }
+        }
+    };
 }

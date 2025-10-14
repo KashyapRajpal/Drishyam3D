@@ -4,18 +4,42 @@ import {
 } from './matrix.js';
 import { initShaderProgram } from './webgl-helpers.js';
 import { setupEditors } from './editor.js';
+import { setupExplorer } from './explorer.js';
 import { createScene } from './scene.js';
 
 window.onload = function() {
-    const canvas = document.querySelector("#glcanvas");
+    const canvas = document.querySelector("#glcanvas"); 
     const gl = canvas.getContext("webgl");
     const errorConsole = document.querySelector("#error-console");
 
-    // Setup editors and get their instances
-    const { vertexShaderEditor, fragmentShaderEditor, scriptEditor } = setupEditors(() => {
+    let isAutoRefreshEnabled = false;
+    let autoRefreshTimer = null;
+
+    function runUpdates() {
         updateShader();
         updateScript();
+        editorManager.clearAllDirtyStates();
+    }
+
+    function resetAutoRefreshTimer() {
+        clearTimeout(autoRefreshTimer);
+        if (isAutoRefreshEnabled) {
+            autoRefreshTimer = setTimeout(runUpdates, 10000); // 10 seconds
+        }
+    }
+
+    // Setup editors and get their instances
+    const editorManager = setupEditors(runUpdates, resetAutoRefreshTimer);
+
+    const autoRefreshCheckbox = document.querySelector('#auto-refresh-checkbox');
+    autoRefreshCheckbox.addEventListener('change', (event) => {
+        isAutoRefreshEnabled = event.target.checked;
+        // Start or stop the timer based on the new state.
+        // If disabling, the existing timer is cleared. If enabling, a new timer is set.
+        resetAutoRefreshTimer();
     });
+
+    const explorer = setupExplorer((fileId, fileName, fileType, readOnly, path) => editorManager.openEditor(fileId, fileName, fileType, readOnly, path));
 
     // Check if WebGL is available
     if (!gl) {
@@ -25,8 +49,12 @@ window.onload = function() {
     
     const scene = createScene(gl, canvas);
     function updateShader() {
-        const vsSource = vertexShaderEditor.getValue();
-        const fsSource = fragmentShaderEditor.getValue();
+        const vsEditor = editorManager.getEditor('vertex');
+        const fsEditor = editorManager.getEditor('fragment');
+        if (!vsEditor || !fsEditor) return; // Don't compile if editors aren't open
+
+        const vsSource = vsEditor.getValue();
+        const fsSource = fsEditor.getValue();
 
         const newShaderProgram = initShaderProgram(gl, vsSource, fsSource);
         if (newShaderProgram) {
@@ -50,6 +78,9 @@ window.onload = function() {
     }
 
     function updateScript() {
+        const scriptEditor = editorManager.getEditor('script');
+        if (!scriptEditor) return; // Don't run if editor isn't open
+
         const scriptCode = scriptEditor.getValue();
         try {
             // Use a Function constructor to safely parse the user code.
@@ -70,9 +101,14 @@ window.onload = function() {
         }
     }
 
+    // --- Initial Setup ---
+    // Open the default project files and wait for them to be ready.
+    const openFilePromises = explorer.getProjectFiles().map(file => {
+        return editorManager.openEditor(file.id, file.name, file.type, file.readOnly, file.path);
+    });
+
     // Initial shader compilation and start rendering loop
     updateShader();
     updateScript();
-    fragmentShaderEditor.refresh(); // Initial refresh for CodeMirror
     scene.start();
 };

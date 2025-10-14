@@ -51,7 +51,7 @@
 
         #editor-panel {
             display: flex;
-            flex-direction: column;
+            flex-direction: column; 
             width: 450px;
             min-width: 300px;
             max-width: 50%;
@@ -76,26 +76,88 @@
             color: #cccccc;
             font-size: 0.9em;
             user-select: none;
+            min-height: 35px;
+        }
+
+        #explorer-header, #editor-header-placeholder {
+            padding: 0 12px;
             height: 35px;
+            line-height: 35px;
+            font-size: 0.8em;
+            font-weight: 600;
+            color: #cccccc;
+            background-color: #3c3c3c;
+            text-transform: uppercase;
+            user-select: none;
+            flex-shrink: 0;
+        }
+
+        .file-item {
+            padding: 6px 12px;
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            font-size: 0.9em;
+            user-select: none;
+        }
+        .file-item:hover {
+            background-color: #3c3c3c;
         }
 
         .editor-tabs {
             display: flex;
             height: 100%;
+            flex-wrap: wrap;
         }
 
         .tab {
-            padding: 0 15px;
+            padding: 10 25px;
             cursor: pointer;
             display: flex;
             align-items: center;
-            border-bottom: 2px solid transparent;
+            border-right: 1px solid #252526;
+            background-color: #2d2d2d;
+            position: relative;
         }
 
         .tab.active {
-            background-color: #252526;
+            background-color: #1e1e1e;
             color: #fff;
-            border-bottom-color: #0e639c;
+        }
+
+        .tab.read-only {
+            font-style: italic;
+            color: #aaa;
+        }
+
+        .tab-close-btn {
+            margin-left: 10px;
+            padding: 2px 4px;
+            border-radius: 4px;
+            line-height: 1;
+            font-family: monospace;
+            font-size: 14px;
+        }
+
+        .tab-close-btn:hover {
+            background-color: #555;
+            color: #fff;
+        }
+
+        /* Dirty indicator styles */
+        .tab .tab-close-btn {
+            position: relative;
+            width: 16px;
+            height: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .tab.dirty .tab-close-btn::before {
+            content: '●';
+            position: absolute;
+            color: #ccc;
+            font-size: 12px;
         }
 
         #editor {
@@ -167,6 +229,32 @@
             flex-grow: 1;
             margin-right: 12px;
         }
+
+        #auto-refresh-container {
+            display: flex;
+            align-items: center;
+            margin-right: 20px;
+        }
+
+        #auto-refresh-container label {
+            font-size: 13px;
+            color: #ccc;
+            cursor: pointer;
+            user-select: none;
+            margin-left: 6px;
+        }
+
+        #readonly-warning-banner {
+            background-color: #ffc107; /* A warning yellow */
+            color: #212529; /* Dark text for contrast */
+            padding: 5px 12px;
+            font-size: 13px;
+            font-weight: 500;
+            text-align: center;
+            display: none; /* Hidden by default */
+            flex-shrink: 0;
+            border-top: 1px solid #444;
+        }
     </style>
 </head>
 <body>
@@ -174,16 +262,16 @@
         <h1>Drishyam3D</h1>
     </header>
     <main id="content-wrapper">
+        <div id="explorer-panel">
+            <div id="explorer-header">Explorer</div>
+            <div id="explorer-list"></div>
+        </div>
         <div id="viewport">
             <canvas id="glcanvas"></canvas>
         </div>
         <div id="editor-panel">
             <div id="editor-header">
-                <div class="editor-tabs">
-                    <div class="tab" data-editor="vertex">Vertex Shader</div>
-                    <div class="tab active" data-editor="fragment">Fragment Shader</div>
-                    <div class="tab" data-editor="script">Scene Script (JS)</div>
-                </div>
+                <div class="editor-tabs"></div>
             </div>
             <textarea id="vertex-editor">attribute vec4 aVertexPosition;
 attribute vec3 aVertexNormal;
@@ -229,8 +317,66 @@ function update(state, deltaTime) {
     state.cubeRotation += deltaTime * 0.5;
 }
             </textarea>
+            <!-- Engine Scripts (Read-Only) -->
+            <textarea id="main-editor" style="display: none;">
+import {
+    translateMatrix,
+    rotateMatrix
+} from './matrix.js';
+import { initShaderProgram } from './webgl-helpers.js';
+import { setupEditors } from './editor.js';
+import { setupExplorer } from './explorer.js';
+import { createScene } from './scene.js';
+
+window.onload = function() {
+    // ... (main.js content)
+};
+            </textarea>
+            <textarea id="scene-editor" style="display: none;">
+import { createIdentityMatrix, createPerspectiveMatrix } from './matrix.js';
+import { initCubeBuffers } from './geometry.js';
+
+function resizeCanvas(canvas) {
+    // ... (scene.js content)
+}
+
+export function createScene(gl, canvas) {
+    // ... (scene.js content)
+}
+            </textarea>
+            <textarea id="editor-editor" style="display: none;">
+/**
+ * Initializes the CodeMirror editors and sets up UI event listeners.
+ * @param {function} onRun - The callback function to execute when the "Run" button is clicked.
+ */
+export function setupEditors(onRun) {
+    // ... (editor.js content)
+}
+            </textarea>
+            <textarea id="explorer-editor" style="display: none;">
+const projectFiles = [
+    // ... (explorer.js content)
+];
+
+const engineFiles = [
+    // ... (explorer.js content)
+];
+
+/**
+ * Sets up the file explorer panel.
+ * @param {function(fileId, fileName, fileType, readOnly, path): void} onFileOpen - Callback to run when a file is double-clicked.
+ */
+export function setupExplorer(onFileOpen) {
+    // ... (explorer.js content)
+}
+            </textarea>
+            <div id="readonly-warning-banner">&#9888; This file is read-only.</div>
             <div id="editor-footer">
                 <div id="error-console"></div>
+                <div id="auto-refresh-container" title="When enabled, the viewport will automatically refresh 10 seconds after you stop typing.">
+                    <input type="checkbox" id="auto-refresh-checkbox">
+                    <label for="auto-refresh-checkbox">Auto Refresh</label>
+                </div>
                 <button id="reload-button">Run</button>
             </div>
         </div>
@@ -239,6 +385,7 @@ function update(state, deltaTime) {
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/clike/clike.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/javascript/javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/edit/closebrackets.min.js"></script>
     <!-- End CodeMirror JS -->
 
     <script type="module" src="../scripts/main.js"></script>
