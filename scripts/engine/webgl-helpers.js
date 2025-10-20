@@ -1,3 +1,9 @@
+/**
+ * @file Helper functions for WebGL shader compilation and linking.
+ * @copyright 2025 Kashyap Rajpal
+ * @license MIT
+ */
+
 // Shader loading function
 function loadShader(gl, type, source) {
     const errorConsole = document.querySelector("#error-console");

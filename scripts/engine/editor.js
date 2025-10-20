@@ -1,4 +1,10 @@
 /**
+ * @file Manages the CodeMirror editors, tabs, and UI interactions.
+ * @copyright 2025 Kashyap Rajpal
+ * @license MIT
+ */
+
+/**
  * Initializes the CodeMirror editors and sets up UI event listeners.
  * @param {function} onRun - The callback function to execute when the "Run" button is clicked.
  * @param {function} onEditorChange - The callback function to execute when any editor content changes.

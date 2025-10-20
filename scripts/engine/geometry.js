@@ -1,3 +1,9 @@
+/**
+ * @file Contains functions for creating and managing geometric shapes and textures.
+ * @copyright 2025 Kashyap Rajpal
+ * @license MIT
+ */
+
 export function initCubeBuffers(gl) {
     // Create a buffer for the cube's vertex positions.
     const positionBuffer = gl.createBuffer();

@@ -1,3 +1,9 @@
+/**
+ * @file Provides matrix utility functions for 3D transformations.
+ * @copyright 2025 Kashyap Rajpal
+ * @license MIT
+ */
+
 export function createIdentityMatrix() {
     return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
 }

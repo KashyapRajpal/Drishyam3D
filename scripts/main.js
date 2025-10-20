@@ -1,3 +1,8 @@
+/**
+ * @file Main entry point for the Drishyam3D application.
+ * @copyright 2025 Kashyap Rajpal
+ * @license MIT
+ */
 import {
     translateMatrix,
     rotateMatrix

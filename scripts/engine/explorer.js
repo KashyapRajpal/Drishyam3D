@@ -1,5 +1,10 @@
+/**
+ * @file Manages the file explorer panel in the editor.
+ * @copyright 2025 Kashyap Rajpal
+ * @license MIT
+ */
 const fileStructure = [
-    { 
+    {
         name: 'Project Files', type: 'folder', children: [
             { id: 'script', name: 'scene-script.js', type: 'javascript', readOnly: false },
         ]

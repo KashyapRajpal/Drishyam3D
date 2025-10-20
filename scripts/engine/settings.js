@@ -1,4 +1,10 @@
 /**
+ * @file Manages application settings and their corresponding UI elements.
+ * @copyright 2025 Kashyap Rajpal
+ * @license MIT
+ */
+
+/**
  * Manages application settings and UI.
  * @param {function(setting: string, value: any): void} onSettingsUpdated - Callback when a setting changes.
  */

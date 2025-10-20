@@ -1,4 +1,10 @@
 /**
+ * @file A simple GLTF model parser.
+ * @copyright 2025 Kashyap Rajpal
+ * @license MIT
+ */
+
+/**
  * Creates a WebGL buffer and uploads data to it.
  * @param {WebGLRenderingContext} gl The WebGL context.
  * @param {number} target The buffer target (e.g., gl.ARRAY_BUFFER).

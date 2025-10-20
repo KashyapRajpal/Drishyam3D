@@ -1,3 +1,9 @@
+/**
+ * @file Sets up event handlers for the main menu bar.
+ * @copyright 2025 Kashyap Rajpal
+ * @license MIT
+ */
+
 import { parseGltf } from './gltf-parser.js';
 import { createDefaultCube, createDefaultTexturedCube } from './geometry.js';
 

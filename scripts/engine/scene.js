@@ -1,3 +1,9 @@
+/**
+ * @file Manages the WebGL scene, rendering loop, and drawable objects.
+ * @copyright 2025 Kashyap Rajpal
+ * @license MIT
+ */
+
 import { createIdentityMatrix, createPerspectiveMatrix } from './matrix.js';
 
 function resizeCanvas(canvas) {
