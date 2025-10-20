@@ -13,6 +13,7 @@ window.onload = function() {
     const canvas = document.querySelector("#glcanvas"); 
     const gl = canvas.getContext("webgl");
     const errorConsole = document.querySelector("#error-console");
+    const reloadButton = document.querySelector('#reload-button');
 
     let isAutoRefreshEnabled = false;
     let autoRefreshTimer = null;
@@ -21,6 +22,7 @@ window.onload = function() {
         updateShader();
         updateScript();
         editorManager.clearAllDirtyStates();
+        reloadButton.disabled = true; // Disable button after updates are applied
     }
 
     function resetAutoRefreshTimer() {
@@ -30,8 +32,14 @@ window.onload = function() {
         }
     }
 
+    function onEditorChange() {
+        reloadButton.disabled = false; // Enable button on any change
+        resetAutoRefreshTimer();
+    }
+
     // Setup editors and get their instances
-    const editorManager = setupEditors(runUpdates, resetAutoRefreshTimer);
+    const editorManager = setupEditors(runUpdates, onEditorChange);
+    reloadButton.disabled = true; // Start with the button disabled
 
     const autoRefreshCheckbox = document.querySelector('#auto-refresh-checkbox');
     autoRefreshCheckbox.addEventListener('change', (event) => {
@@ -72,6 +80,16 @@ window.onload = function() {
             console.error("Failed to read file:", reader.error);
         };
         reader.readAsArrayBuffer(file);
+    });
+
+    const resetSceneBtn = document.querySelector('#reset-scene-btn');
+    resetSceneBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        // Re-load the original cube geometry
+        scene.loadGeometry(cubeGeometry);
+        // Re-run the script to reset its state (e.g., rotation)
+        updateScript();
+        console.log("Scene reset to default.");
     });
 
     // Check if WebGL is available

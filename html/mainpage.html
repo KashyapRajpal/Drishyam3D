@@ -71,6 +71,12 @@
         #file-menu-container:hover .dropdown-content {
             display: block;
         }
+        .menu-separator {
+            height: 1px;
+            margin: 5px 0;
+            background-color: #444;
+            border: none;
+        }
 
         #content-wrapper {
             display: flex;
@@ -253,6 +259,12 @@
             background-color: #157dc5;
         }
 
+        #reload-button:disabled {
+            background-color: #5a5a5a;
+            color: #9e9e9e;
+            cursor: not-allowed;
+        }
+
         #error-console {
             background-color: #431616;
             color: #f7a7a7;
@@ -299,6 +311,8 @@
             <div class="menu-item">File</div>
             <div class="dropdown-content">
                 <a href="#" id="import-model-btn">Import Model...</a>
+                <div class="menu-separator"></div>
+                <a href="#" id="reset-scene-btn">Reset Scene</a>
             </div>
         </div>
         <input type="file" id="model-file-input" style="display: none;" accept=".gltf,.glb">
