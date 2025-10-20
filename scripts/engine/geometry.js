@@ -142,8 +142,24 @@ export function createDefaultCube(gl) {
  * @returns {Promise<{buffers: object, texture: WebGLTexture, vertexCount: number}>}
  */
 export async function createDefaultTexturedCube(gl) {
+    // This function is now async because it needs to dynamically import the asset manifest.
+    // We do this to ensure we always get the latest version of the manifest itself.
     try {
-        const texture = await loadTexture(gl, '../assets/checkerboard-texture.jpg');
+        // Dynamically import the manifest to avoid browser caching of the version numbers.
+        const { assetVersions } = await import(`../../assets/asset-manifest.js?t=${new Date().getTime()}`);
+        
+        const texturePath = '../assets/checkerboard-texture.jpg';
+        const version = assetVersions[texturePath];
+        let textureUrl;
+
+        if (version) {
+            textureUrl = `${texturePath}?v=${version}`;
+        } else {
+            console.warn(`No version found for ${texturePath}. Falling back to timestamp.`);
+            textureUrl = `${texturePath}?t=${new Date().getTime()}`;
+        }
+
+        const texture = await loadTexture(gl, textureUrl);
         return {
             buffers: initCubeBuffers(gl),
             texture: texture,
