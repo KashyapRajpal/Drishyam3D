@@ -6,8 +6,10 @@ function loadShader(gl, type, source) {
     gl.compileShader(shader);
 
     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        const errorMsg = `Shader compile error: ${gl.getShaderInfoLog(shader)}`;
+        const shaderType = type === gl.VERTEX_SHADER ? 'Vertex' : 'Fragment';
+        const errorMsg = `${shaderType} Shader Compile Error: ${gl.getShaderInfoLog(shader)}`;
         errorConsole.textContent = errorMsg;
+        console.error(errorMsg);
         errorConsole.style.display = 'block';
         gl.deleteShader(shader);
         return null;
@@ -32,8 +34,9 @@ export function initShaderProgram(gl, vsSource, fsSource) {
     gl.linkProgram(shaderProgram);
 
     if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
-        const errorMsg = "Shader program link error: " + gl.getProgramInfoLog(shaderProgram);
+        const errorMsg = `Shader Program Link Error: ${gl.getProgramInfoLog(shaderProgram)}`;
         errorConsole.textContent = errorMsg;
+        console.error(errorMsg);
         errorConsole.style.display = 'block';
         return null;
     }

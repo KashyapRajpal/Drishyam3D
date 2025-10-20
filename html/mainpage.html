@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧊</text></svg>">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Drishyam3D</title>
     <!-- CodeMirror CSS -->
@@ -37,8 +38,13 @@
             margin: 0;
         }
 
+        #main-header .menu-bar {
+            display: flex;
+            flex-grow: 1;
+        }
+
         /* File Menu Styles */
-        #file-menu-container {
+        .file-menu-container {
             position: relative;
             display: inline-block;
             margin-right: 20px;
@@ -68,7 +74,7 @@
             font-size: 0.9em;
         }
         .dropdown-content a:hover { background-color: #3c3c3c; }
-        #file-menu-container:hover .dropdown-content {
+        .file-menu-container:hover .dropdown-content {
             display: block;
         }
         .menu-separator {
@@ -143,6 +149,14 @@
         }
         .file-item:hover {
             background-color: #3c3c3c;
+        }
+
+        .folder-item {
+            padding: 6px 12px;
+            cursor: pointer;
+            font-weight: bold;
+            user-select: none;
+            color: #ccc;
         }
 
         .editor-tabs {
@@ -307,12 +321,22 @@
 <body>
     <header id="main-header">
         <h1>Drishyam3D</h1>
-        <div id="file-menu-container">
-            <div class="menu-item">File</div>
-            <div class="dropdown-content">
-                <a href="#" id="import-model-btn">Import Model...</a>
-                <div class="menu-separator"></div>
-                <a href="#" id="reset-scene-btn">Reset Scene</a>
+        <div class="menu-bar">
+            <div id="file-menu-container">
+                <div class="menu-item">File</div>
+                <div class="dropdown-content">
+                    <a href="#" id="import-model-btn">Import Model...</a>
+                    <div class="menu-separator"></div>
+                    <a href="#" id="reset-scene-btn">Reset Scene</a>
+                </div>
+            </div>
+            <div id="settings-menu-container" class="file-menu-container">
+                <div class="menu-item">Settings</div>
+                <div class="dropdown-content">
+                    <a href="#" id="textured-cube-toggle">
+                        <input type="checkbox" id="textured-cube-checkbox" style="margin-right: 8px;">Textured Default Cube
+                    </a>
+                </div>
             </div>
         </div>
         <input type="file" id="model-file-input" style="display: none;" accept=".gltf,.glb">
@@ -329,33 +353,8 @@
             <div id="editor-header">
                 <div class="editor-tabs"></div>
             </div>
-            <textarea id="vertex-editor">attribute vec4 aVertexPosition;
-attribute vec3 aVertexNormal;
-
-uniform mat4 uModelViewMatrix;
-uniform mat4 uProjectionMatrix;
-
-varying highp vec3 vLighting;
-
-void main() {
-    gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
-
-    // Apply lighting effect
-    highp vec3 ambientLight = vec3(0.3, 0.3, 0.3);
-    highp vec3 directionalLightColor = vec3(1, 1, 1);
-    highp vec3 directionalVector = normalize(vec3(0.85, 0.8, 0.75));
-
-    highp float directional = max(dot(aVertexNormal, directionalVector), 0.0);
-    vLighting = ambientLight + (directionalLightColor * directional);
-}
-            </textarea>
-            <textarea id="fragment-editor">precision highp float;
-varying highp vec3 vLighting;
-
-void main(void) {
-    gl_FragColor = vec4(0.5, 0.5, 1.0, 1.0) * vec4(vLighting, 1.0);
-}
-            </textarea>
+            <textarea id="vertex-editor" style="display: none;"></textarea>
+            <textarea id="fragment-editor" style="display: none;"></textarea>
             <textarea id="script-editor" style="display: none;">
 // The 'state' object is passed from the main application.
 // 'state' contains: modelViewMatrix, projectionMatrix

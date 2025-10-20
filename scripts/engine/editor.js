@@ -69,64 +69,74 @@ export function setupEditors(onRun, onEditorChange) {
         }
     }
 
-    function openEditor(fileId, fileName, fileType, readOnly = false, path = null) {
+    async function openEditor(fileId, fileName, fileType, readOnly = false, path = null) {
         if (openEditors[fileId]) {
             switchToTab(fileId);
-            return;
+            return Promise.resolve(); // Already open, resolve immediately
         }
 
         const textArea = document.querySelector(`#${fileId}-editor`);
-
         if (!textArea) {
             console.error(`Textarea with id #${fileId}-editor not found.`);
-            return;
+            return Promise.resolve(); // Cannot open, resolve immediately
         }
 
-        // Create a new tab element
-        const tabEl = document.createElement('div');
-        tabEl.className = 'tab';
-        tabEl.dataset.fileId = fileId;
-        tabEl.addEventListener('click', () => switchToTab(fileId));
-        if (readOnly) {
-            tabEl.classList.add('read-only');
+        // --- IMPORTANT: Populate textArea.value BEFORE CodeMirror.fromTextArea ---
+        if (path) {
+            try {
+                const response = await fetch(path);
+                if (!response.ok) throw new Error(`Failed to fetch ${path}`);
+                const text = await response.text();
+                textArea.value = text;
+            } catch (err) {
+                console.error(`Failed to fetch content for ${fileName}:`, err);
+                textArea.value = `// Error: Could not load ${fileName}`;
+            }
         }
+        // If no path, it means the content is already in the HTML textarea (e.g., scene-script.js)
 
-        const tabTitle = document.createElement('span');
-        tabTitle.textContent = fileName;
-        tabEl.appendChild(tabTitle);
+        // Now, initialize CodeMirror from the textarea.
+        // We use setTimeout(0) to ensure CodeMirror's internal DOM manipulation
+        // happens after the current call stack, giving it time to read the textarea's value.
+        return new Promise(resolve => {
+            setTimeout(() => {
+                const tabEl = document.createElement('div');
+                tabEl.className = 'tab';
+                tabEl.dataset.fileId = fileId;
+                tabEl.addEventListener('click', () => switchToTab(fileId));
+                if (readOnly) tabEl.classList.add('read-only');
 
-        const closeBtn = document.createElement('span');
-        closeBtn.className = 'tab-close-btn';
-        closeBtn.textContent = 'x';
-        closeBtn.addEventListener('click', (event) => closeEditor(fileId, event));
-        tabEl.appendChild(closeBtn);
-        editorTabsContainer.appendChild(tabEl);
+                const tabTitle = document.createElement('span');
+                tabTitle.textContent = fileName;
+                tabEl.appendChild(tabTitle);
 
-        // Create a new CodeMirror instance
-        const editor = CodeMirror.fromTextArea(textArea, {
-            lineNumbers: true,
-            mode: fileType,
-            theme: "dracula",
-            lineWrapping: true,
-            autoCloseBrackets: true,
-            readOnly: readOnly,
+                const closeBtn = document.createElement('span');
+                closeBtn.className = 'tab-close-btn';
+                closeBtn.textContent = 'x';
+                closeBtn.addEventListener('click', (event) => closeEditor(fileId, event));
+                tabEl.appendChild(closeBtn);
+                editorTabsContainer.appendChild(tabEl);
+
+                const editor = CodeMirror.fromTextArea(textArea, {
+                    lineNumbers: true, mode: fileType, theme: "dracula",
+                    lineWrapping: true, autoCloseBrackets: true, readOnly: readOnly,
+                });
+
+                if (!readOnly) {
+                    editor.on('change', () => {
+                        if (!openEditors[fileId].isDirty) {
+                            openEditors[fileId].isDirty = true;
+                            tabEl.classList.add('dirty');
+                        }
+                        if (onEditorChange) onEditorChange();
+                    });
+                }
+
+                openEditors[fileId] = { editor, tabEl, readOnly };
+                switchToTab(fileId);
+                resolve();
+            }, 0); // Defer to next tick
         });
-
-        // Add dirty indicator logic for editable files
-        if (!readOnly) {
-            editor.on('change', () => {
-                if (!openEditors[fileId].isDirty) {
-                    openEditors[fileId].isDirty = true;
-                    tabEl.classList.add('dirty');
-                }
-                if (onEditorChange) {
-                    onEditorChange();
-                }
-            });
-        }
-
-        openEditors[fileId] = { editor, tabEl, readOnly };
-        switchToTab(fileId);
     }
 
     // --- Run Button Logic ---

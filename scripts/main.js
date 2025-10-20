@@ -1,13 +1,15 @@
 import {
     translateMatrix,
     rotateMatrix
-} from './matrix.js';
-import { initShaderProgram } from './webgl-helpers.js';
-import { setupEditors } from './editor.js';
-import { initCubeBuffers } from './geometry.js';
-import { parseGltf } from './gltf-parser.js';
-import { setupExplorer } from './explorer.js';
-import { createScene } from './scene.js';
+} from './engine/matrix.js';
+import { initShaderProgram } from './engine/webgl-helpers.js';
+import { setupEditors } from './engine/editor.js';
+import { createDefaultCube, createDefaultTexturedCube } from './engine/geometry.js';
+import { parseGltf } from './engine/gltf-parser.js';
+import { setupExplorer } from './engine/explorer.js';
+import { setupSettings } from './engine/settings.js';
+import { setupMenuHandlers } from './engine/menu-handlers.js';
+import { createScene } from './engine/scene.js';
 
 window.onload = function() {
     const canvas = document.querySelector("#glcanvas"); 
@@ -17,6 +19,7 @@ window.onload = function() {
 
     let isAutoRefreshEnabled = false;
     let autoRefreshTimer = null;
+    let scene = null; // Declare scene in a higher scope
 
     function runUpdates() {
         updateShader();
@@ -51,57 +54,13 @@ window.onload = function() {
 
     const explorer = setupExplorer((fileId, fileName, fileType, readOnly, path) => editorManager.openEditor(fileId, fileName, fileType, readOnly, path));
 
-    // --- Model Importer Logic ---
-    const importModelBtn = document.querySelector('#import-model-btn');
-    const modelFileInput = document.querySelector('#model-file-input');
-
-    importModelBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        modelFileInput.click();
+    const settings = setupSettings((setting, value) => {
+        console.log(`Setting updated: ${setting} = ${value}`);
+        if (setting === 'useTexturedDefaultCube') {
+            // Find the reset button and trigger a click to apply the new default cube
+            document.querySelector('#reset-scene-btn').click();
+        }
     });
-
-    modelFileInput.addEventListener('change', (event) => {
-        const file = event.target.files[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-            try {
-                const arrayBuffer = e.target.result;
-                const drawable = await parseGltf(gl, arrayBuffer);
-                scene.loadGeometry(drawable);
-            } catch (error) {
-                console.error("Failed to load GLTF model:", error);
-                errorConsole.textContent = `GLTF Error: ${error.message}`;
-                errorConsole.style.display = 'block';
-            }
-        };
-        reader.onerror = () => {
-            console.error("Failed to read file:", reader.error);
-        };
-        reader.readAsArrayBuffer(file);
-    });
-
-    const resetSceneBtn = document.querySelector('#reset-scene-btn');
-    resetSceneBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        // Re-load the original cube geometry
-        scene.loadGeometry(cubeGeometry);
-        // Re-run the script to reset its state (e.g., rotation)
-        updateScript();
-        console.log("Scene reset to default.");
-    });
-
-    // Check if WebGL is available
-    if (!gl) {
-        alert("Unable to initialize WebGL. Your browser may not support it.");
-        return;
-    }
-    
-    const scene = createScene(gl, canvas);
-    // Load the initial cube geometry into the scene
-    const cubeGeometry = { buffers: initCubeBuffers(gl), vertexCount: 36 };
-    scene.loadGeometry(cubeGeometry);
 
     function updateShader() {
         const vsEditor = editorManager.getEditor('vertex');
@@ -118,10 +77,14 @@ window.onload = function() {
                 attribLocations: {
                     vertexPosition: gl.getAttribLocation(newShaderProgram, "aVertexPosition"),
                     vertexNormal: gl.getAttribLocation(newShaderProgram, "aVertexNormal"),
+                    textureCoord: gl.getAttribLocation(newShaderProgram, "aTextureCoord"),
                 },
                 uniformLocations: {
                     projectionMatrix: gl.getUniformLocation(newShaderProgram, "uProjectionMatrix"),
                     modelViewMatrix: gl.getUniformLocation(newShaderProgram, "uModelViewMatrix"),
+                    uSampler: gl.getUniformLocation(newShaderProgram, "uSampler"),
+                    uBaseColor: gl.getUniformLocation(newShaderProgram, "uBaseColor"),
+                    uHasTexture: gl.getUniformLocation(newShaderProgram, "uHasTexture"),
                 },
             };
             scene.updateProgramInfo(newProgramInfo);
@@ -156,14 +119,36 @@ window.onload = function() {
         }
     }
 
-    // --- Initial Setup ---
-    // Open the default project files and wait for them to be ready.
-    const openFilePromises = explorer.getProjectFiles().map(file => {
-        return editorManager.openEditor(file.id, file.name, file.type, file.readOnly, file.path);
-    });
+    async function initializeApp() {
+        // Check if WebGL is available
+        if (!gl) {
+            alert("Unable to initialize WebGL. Your browser may not support it.");
+            return;
+        }
 
-    // Initial shader compilation and start rendering loop
-    updateShader();
-    updateScript();
-    scene.start();
+        scene = createScene(gl, canvas);
+
+        let cubeGeometry;
+        const useTexturedDefaultCube = settings.get('useTexturedDefaultCube');
+        if (useTexturedDefaultCube) {
+            cubeGeometry = await createDefaultTexturedCube(gl);
+        } else {
+            cubeGeometry = createDefaultCube(gl);
+        }
+        scene.loadGeometry(cubeGeometry);
+
+        // Setup menu handlers
+        setupMenuHandlers({ gl, scene, settings, updateScript });
+
+        // Open the default project files and wait for them to be ready.
+        const openFilePromises = explorer.getProjectFiles().map(file => {
+            return editorManager.openEditor(file.id, file.name, file.type, file.readOnly, file.path);
+        });
+        await Promise.all(openFilePromises);
+
+        runUpdates();
+        scene.start();
+    }
+
+    initializeApp();
 };
