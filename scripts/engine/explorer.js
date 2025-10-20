@@ -44,33 +44,33 @@ export function setupExplorer(onFileOpen) {
 
     function buildExplorer(items, container, depth = 0) {
         items.forEach(item => {
-            const element = document.createElement('div');
-            element.style.paddingLeft = `${depth * 15}px`;
+            const itemElement = document.createElement('div');
+            itemElement.style.paddingLeft = `${depth * 20}px`;
 
             if (item.type === 'folder') {
-                element.className = 'folder-item';
-                element.textContent = `▶ ${item.name}`;
+                itemElement.className = 'folder-item';
+                itemElement.textContent = `▶ ${item.name}`;
                 const childrenContainer = document.createElement('div');
                 childrenContainer.className = 'folder-content';
                 childrenContainer.style.display = 'none'; // Initially collapsed
 
-                element.addEventListener('click', () => {
+                itemElement.addEventListener('click', () => {
                     const isCollapsed = childrenContainer.style.display === 'none';
                     childrenContainer.style.display = isCollapsed ? 'block' : 'none';
-                    element.textContent = `${isCollapsed ? '▼' : '▶'} ${item.name}`;
+                    itemElement.textContent = `${isCollapsed ? '▼' : '▶'} ${item.name}`;
                 });
 
-                container.appendChild(element);
+                container.appendChild(itemElement);
                 container.appendChild(childrenContainer);
                 buildExplorer(item.children, childrenContainer, depth + 1);
             } else {
-                element.className = 'file-item';
-                element.textContent = item.name;
-                element.dataset.fileId = item.id;
-                element.addEventListener('dblclick', () => {
+                itemElement.className = 'file-item';
+                itemElement.textContent = item.name;
+                itemElement.dataset.fileId = item.id;
+                itemElement.addEventListener('dblclick', () => {
                     onFileOpen(item.id, item.name, item.type, item.readOnly, item.path);
                 });
-                container.appendChild(element);
+                container.appendChild(itemElement);
             }
         });
     }

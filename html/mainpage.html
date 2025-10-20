@@ -28,6 +28,7 @@
             height: 48px;
             display: flex;
             align-items: center;
+            /* Removed justify-content: space-between; to allow h1 and menu-bar to flow naturally */
             border-bottom: 1px solid #444;
             flex-shrink: 0;
         }
@@ -35,19 +36,23 @@
         #main-header h1 {
             font-size: 1.2em;
             font-weight: 600;
-            margin: 0;
+            margin: 0; /* Reset margin */
+            padding-right: 20px; /* Add some space after the title */
+            flex-shrink: 0; /* Prevent h1 from shrinking */
         }
 
         #main-header .menu-bar {
             display: flex;
-            flex-grow: 1;
+            flex-grow: 0; /* Prevent menu bar from growing unnecessarily */
+            flex-shrink: 0; /* Prevent menu bar from shrinking */
         }
 
         /* File Menu Styles */
-        .file-menu-container {
+        .menu-container {
             position: relative;
             display: inline-block;
             margin-right: 20px;
+            flex-shrink: 0; /* Prevent menu containers from shrinking */
         }
         .menu-item {
             padding: 6px 12px;
@@ -58,6 +63,7 @@
             background-color: #3c3c3c;
         }
         .dropdown-content {
+            top: 100%; /* Position below the menu item */
             display: none;
             position: absolute;
             background-color: #252526;
@@ -74,7 +80,7 @@
             font-size: 0.9em;
         }
         .dropdown-content a:hover { background-color: #3c3c3c; }
-        .file-menu-container:hover .dropdown-content {
+        .menu-container:hover .dropdown-content {
             display: block;
         }
         .menu-separator {
@@ -140,23 +146,23 @@
         }
 
         .file-item {
-            padding: 6px 12px;
-            display: flex;
-            align-items: center;
+            padding: 4px 20px;
             cursor: pointer;
-            font-size: 0.9em;
+            font-size: 0.85em;
             user-select: none;
+            position: relative;
         }
         .file-item:hover {
             background-color: #3c3c3c;
         }
 
         .folder-item {
-            padding: 6px 12px;
+            padding: 6px 20px;
             cursor: pointer;
             font-weight: bold;
             user-select: none;
             color: #ccc;
+            font-size: 0.85em;
         }
 
         .editor-tabs {
@@ -166,7 +172,7 @@
         }
 
         .tab {
-            padding: 10 25px;
+            padding: 10px 25px;
             cursor: pointer;
             display: flex;
             align-items: center;
@@ -322,7 +328,7 @@
     <header id="main-header">
         <h1>Drishyam3D</h1>
         <div class="menu-bar">
-            <div id="file-menu-container">
+            <div id="file-menu-container" class="menu-container">
                 <div class="menu-item">File</div>
                 <div class="dropdown-content">
                     <a href="#" id="import-model-btn">Import Model...</a>
@@ -330,7 +336,7 @@
                     <a href="#" id="reset-scene-btn">Reset Scene</a>
                 </div>
             </div>
-            <div id="settings-menu-container" class="file-menu-container">
+            <div id="settings-menu-container" class="menu-container">
                 <div class="menu-item">Settings</div>
                 <div class="dropdown-content">
                     <a href="#" id="textured-cube-toggle">
@@ -444,7 +450,7 @@ export function setupExplorer(onFileOpen) {
     <!-- End CodeMirror JS -->
 
     <!-- GLTF Loader -->
-    <script src="https://unpkg.com/gltf-loader-ts@1.0.3/dist/gltf-loader.js"></script>
+    <script src="https://unpkg.com/gltf-loader-ts@1.0.3/dist/gltf-loader.js" defer></script>
 
     <script type="module" src="../scripts/main.js"></script>
 </body>

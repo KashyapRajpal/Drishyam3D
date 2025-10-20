@@ -42,6 +42,10 @@ function createAndBindTexture(gl, image) {
  * @returns {Promise<{buffers: object, vertexCount: number}>} A drawable object for the scene.
  */
 export async function parseGltf(gl, gltfData) {
+    if (typeof GltfLoader === 'undefined') {
+        throw new Error("GltfLoader library is not available. Check if the script has loaded.");
+    }
+
     const loader = new GltfLoader.GltfLoader();
     const asset = new GltfLoader.GltfAsset(gltfData);
     const gltf = await loader.load(asset);
