@@ -79,7 +79,24 @@
             display: block;
             font-size: 0.9em;
         }
-        .dropdown-content a:hover { background-color: #3c3c3c; }
+        .dropdown-content a.menu-checkbox {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+        }
+        .dropdown-content a.menu-checkbox input {
+            margin-right: 10px;
+            cursor: pointer;
+        }
+        .dropdown-content a.menu-checkbox label {
+            cursor: pointer;
+            flex-grow: 1;
+        }
+        .dropdown-content a.disabled {
+            color: #777;
+            cursor: not-allowed;
+        }
+        .dropdown-content a:not(.disabled):hover { background-color: #3c3c3c; }
         .menu-container:hover .dropdown-content {
             display: block;
         }
@@ -336,12 +353,26 @@
                     <a href="#" id="reset-scene-btn">Reset Scene</a>
                 </div>
             </div>
+            <div id="shapes-menu-container" class="menu-container">
+                <div class="menu-item">Shapes</div>
+                <div class="dropdown-content">
+                    <a href="#" id="shape-textured-toggle" class="menu-checkbox">
+                        <input type="checkbox" id="shape-textured-checkbox">
+                        <label for="shape-textured-checkbox">Textured</label>
+                    </a>
+                    <div class="menu-separator"></div>
+                    <a href="#" id="shape-cube-btn">Cube</a>
+                    <a href="#" id="shape-sphere-btn">Sphere</a>
+                    <div class="menu-separator"></div>
+                    <a href="#" class="disabled">Cone (soon)</a>
+                    <a href="#" class="disabled">Cylinder (soon)</a>
+                    <a href="#" class="disabled">Trapezoid (soon)</a>
+                </div>
+            </div>
             <div id="settings-menu-container" class="menu-container">
                 <div class="menu-item">Settings</div>
                 <div class="dropdown-content">
-                    <a href="#" id="textured-cube-toggle">
-                        <input type="checkbox" id="textured-cube-checkbox" style="margin-right: 8px;">Textured Default Cube
-                    </a>
+                    <a href="#" class="disabled">No settings available</a>
                 </div>
             </div>
         </div>

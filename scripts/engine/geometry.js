@@ -171,3 +171,108 @@ export async function createDefaultTexturedCube(gl) {
         return { buffers: initCubeBuffers(gl), texture: null, vertexCount: 36 };
     }
 }
+
+/**
+ * Creates a textured sphere drawable object.
+ * @param {WebGLRenderingContext} gl The WebGL context.
+ * @returns {Promise<{buffers: object, texture: WebGLTexture, vertexCount: number}>}
+ */
+export async function createTexturedSphere(gl) {
+    try {
+        // Dynamically import the manifest to avoid browser caching of the version numbers.
+        const { assetVersions } = await import(`../../assets/asset-manifest.js?t=${new Date().getTime()}`);
+        
+        const texturePath = '../assets/checkerboard-texture.jpg';
+        const version = assetVersions[texturePath];
+        let textureUrl;
+
+        if (version) {
+            textureUrl = `${texturePath}?v=${version}`;
+        } else {
+            console.warn(`No version found for ${texturePath}. Falling back to timestamp.`);
+            textureUrl = `${texturePath}?t=${new Date().getTime()}`;
+        }
+
+        const texture = await loadTexture(gl, textureUrl);
+        const sphereGeometry = createSphere(gl); // Re-use the sphere creation logic
+
+        sphereGeometry.texture = texture; // Attach the loaded texture
+        return sphereGeometry;
+    } catch (error) {
+        console.error("Could not create default textured sphere:", error);
+        return createSphere(gl); // Fallback to untextured sphere
+    }
+}
+
+/**
+ * Creates a sphere drawable object.
+ * @param {WebGLRenderingContext} gl The WebGL context.
+ * @param {number} [radius=1] The radius of the sphere.
+ * @param {number} [latitudeBands=30] The number of horizontal bands.
+ * @param {number} [longitudeBands=30] The number of vertical bands.
+ * @returns {{buffers: object, texture: null, vertexCount: number}}
+ */
+export function createSphere(gl, radius = 1, latitudeBands = 30, longitudeBands = 30) {
+    const vertexPositionData = [];
+    const normalData = [];
+    const textureCoordData = [];
+
+    for (let latNumber = 0; latNumber <= latitudeBands; latNumber++) {
+        const theta = latNumber * Math.PI / latitudeBands;
+        const sinTheta = Math.sin(theta);
+        const cosTheta = Math.cos(theta);
+
+        for (let longNumber = 0; longNumber <= longitudeBands; longNumber++) {
+            const phi = longNumber * 2 * Math.PI / longitudeBands;
+            const sinPhi = Math.sin(phi);
+            const cosPhi = Math.cos(phi);
+
+            const x = cosPhi * sinTheta;
+            const y = cosTheta;
+            const z = sinPhi * sinTheta;
+            const u = 1 - (longNumber / longitudeBands);
+            const v = 1 - (latNumber / latitudeBands);
+
+            normalData.push(x, y, z);
+            textureCoordData.push(u, v);
+            vertexPositionData.push(radius * x, radius * y, radius * z);
+        }
+    }
+
+    const indexData = [];
+    for (let latNumber = 0; latNumber < latitudeBands; latNumber++) {
+        for (let longNumber = 0; longNumber < longitudeBands; longNumber++) {
+            const first = (latNumber * (longitudeBands + 1)) + longNumber;
+            const second = first + longitudeBands + 1;
+            indexData.push(first, second, first + 1);
+            indexData.push(second, second + 1, first + 1);
+        }
+    }
+
+    const normalBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normalData), gl.STATIC_DRAW);
+
+    const textureCoordBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, textureCoordBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(textureCoordData), gl.STATIC_DRAW);
+
+    const positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertexPositionData), gl.STATIC_DRAW);
+
+    const indexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indexData), gl.STATIC_DRAW);
+
+    return {
+        buffers: {
+            position: positionBuffer,
+            normal: normalBuffer,
+            texCoord: textureCoordBuffer,
+            indices: indexBuffer,
+        },
+        texture: null,
+        vertexCount: indexData.length,
+    };
+}

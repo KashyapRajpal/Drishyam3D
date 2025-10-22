@@ -133,13 +133,8 @@ window.onload = function() {
 
         scene = createScene(gl, canvas);
 
-        let cubeGeometry;
-        const useTexturedDefaultCube = settings.get('useTexturedDefaultCube');
-        if (useTexturedDefaultCube) {
-            cubeGeometry = await createDefaultTexturedCube(gl);
-        } else {
-            cubeGeometry = createDefaultCube(gl);
-        }
+        // Always initialize with the default, untextured cube.
+        const cubeGeometry = createDefaultCube(gl);
         scene.loadGeometry(cubeGeometry);
 
         // Setup menu handlers
