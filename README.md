@@ -1,5 +1,9 @@
 # Drishyam3D - A Simple WebGL Scene Editor
 
+[![Status: Beta](https://img.shields.io/badge/status-beta-blue.svg)](https://github.com/kashyaprajpal/Drishyam3D)
+
+[**Live Demo (Coming Soon!)**](#)
+
 Drishyam3D is a lightweight, browser-based 3D scene editor built with WebGL. It provides a simple interface for writing and testing fragment shaders and scene manipulation scripts in real-time.
 
 ## Features
@@ -22,12 +26,17 @@ This project uses modern JavaScript modules (`import`/`export`), which have spec
 Modern browsers enforce security features like Cross-Origin Resource Sharing (CORS) and restrict access to local file systems. When you use JavaScript modules or attempt to load local files (like GLTF assets), the browser blocks these operations if you open the HTML file directly from your local disk (`file:///`). A local server provides the necessary `http://` protocol, which gives your project a valid "origin" and allows modules to load and the File System Access API to function correctly.
 
 **Steps to run:**
- 
+
 1.  Clone the repository.
 2.  Open your terminal, navigate to the project's root directory, and start a simple web server. If you have Python 3, you can use:
 
     ```bash
     python -m http.server
+    ```
+    
+    Alternatively, if you have Node.js and `npx` installed, you can use:
+    ```bash
+    npx http-server
     ```
 
 3.  Open your web browser and navigate to: `http://localhost:8000/html/mainpage.html`
