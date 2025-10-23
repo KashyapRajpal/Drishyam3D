@@ -39,7 +39,7 @@ export function createScene(gl, canvas) {
     };
 
     const sceneState = {
-        cubeRotation: 0.0,
+        modelRotation: 0.0,
         modelViewMatrix: null,
     };
 
@@ -143,7 +143,7 @@ export function createScene(gl, canvas) {
 
         {
             const vertexCount = drawable.vertexCount;
-            const type = gl.UNSIGNED_SHORT;
+            const type = drawable.indexType; // Use the type from the drawable object
             const offset = 0;
             gl.drawElements(gl.TRIANGLES, vertexCount, type, offset);
         }

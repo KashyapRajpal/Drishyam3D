@@ -348,7 +348,9 @@
             <div id="file-menu-container" class="menu-container">
                 <div class="menu-item">File</div>
                 <div class="dropdown-content">
-                    <a href="#" id="import-model-btn">Import Model...</a>
+                    <a href="#" id="import-model-btn">Import (.zip, .gltf)...</a>
+                    <div class="menu-separator"></div>
+                    <a href="#" id="load-sample-gltf-btn">Load Sample Model</a>
                     <div class="menu-separator"></div>
                     <a href="#" id="reset-scene-btn">Reset Scene</a>
                 </div>
@@ -376,7 +378,7 @@
                 </div>
             </div>
         </div>
-        <input type="file" id="model-file-input" style="display: none;" accept=".gltf,.glb">
+        <input type="file" id="model-file-input" style="display: none;" accept=".zip,.gltf,.glb,.bin,.png,.jpg,.jpeg" multiple>
     </header>
     <main id="content-wrapper">
         <div id="explorer-panel">
@@ -399,14 +401,14 @@
 
 function init(state) {
     // This function is called once when the script is loaded.
-    state.cubeRotation = 0.0;
+    state.modelRotation = 0.0;
 }
 
 function update(state, deltaTime) {
     // This function is called on every frame.
     translateMatrix(state.modelViewMatrix, [-0.0, 0.0, -6.0]);
-    rotateMatrix(state.modelViewMatrix, state.cubeRotation, [0, 1, 0]);
-    state.cubeRotation += deltaTime * 0.5;
+    rotateMatrix(state.modelViewMatrix, state.modelRotation, [0, 1, 0]);
+    state.modelRotation += deltaTime * 0.5;
 }
             </textarea>
             <!-- Engine Scripts (Read-Only) -->
@@ -481,7 +483,9 @@ export function setupExplorer(onFileOpen) {
     <!-- End CodeMirror JS -->
 
     <!-- GLTF Loader -->
-    <script src="https://unpkg.com/gltf-loader-ts@1.0.3/dist/gltf-loader.js" defer></script>
+
+    <!-- JSZip for handling .zip file imports -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
     <script type="module" src="../scripts/main.js"></script>
 </body>

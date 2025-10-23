@@ -133,6 +133,7 @@ export function createDefaultCube(gl) {
         buffers: initCubeBuffers(gl),
         texture: null, // Explicitly untextured
         vertexCount: 36,
+        indexType: gl.UNSIGNED_SHORT, // Our cube uses Uint16Array
     };
 }
 
@@ -164,11 +165,12 @@ export async function createDefaultTexturedCube(gl) {
             buffers: initCubeBuffers(gl),
             texture: texture,
             vertexCount: 36,
+            indexType: gl.UNSIGNED_SHORT,
         };
     } catch (error) {
         console.error("Could not create default textured cube:", error);
         // Fallback to an untextured cube if texture loading fails
-        return { buffers: initCubeBuffers(gl), texture: null, vertexCount: 36 };
+        return createDefaultCube(gl);
     }
 }
 
@@ -274,5 +276,6 @@ export function createSphere(gl, radius = 1, latitudeBands = 30, longitudeBands 
         },
         texture: null,
         vertexCount: indexData.length,
+        indexType: gl.UNSIGNED_SHORT, // Our sphere uses Uint16Array
     };
 }

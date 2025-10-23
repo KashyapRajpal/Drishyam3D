@@ -19,6 +19,7 @@ export function setupMenuHandlers({ gl, scene, settings, updateScript }) {
     const errorConsole = document.querySelector("#error-console");
     const importModelBtn = document.querySelector('#import-model-btn');
     const modelFileInput = document.querySelector('#model-file-input');
+    const loadSampleGltfBtn = document.querySelector('#load-sample-gltf-btn');
     const resetSceneBtn = document.querySelector('#reset-scene-btn');
 
     // --- Shape Menu Buttons ---
@@ -28,29 +29,97 @@ export function setupMenuHandlers({ gl, scene, settings, updateScript }) {
 
     let currentShapeLoader = null; // This will hold a function to reload the current shape
 
-    importModelBtn.addEventListener('click', (e) => {
+    importModelBtn.addEventListener('click', async (e) => {
         e.preventDefault();
-        modelFileInput.click();
+
+        // Use the modern File System Access API (directory picker) if available
+        if (window.showDirectoryPicker) {
+            try {
+                const dirHandle = await window.showDirectoryPicker();
+                const fileMap = new Map();
+                
+                async function processHandle(handle, path) {
+                    if (handle.kind === 'file') {
+                        const file = await handle.getFile();
+                        fileMap.set(path + handle.name, file);
+                    } else if (handle.kind === 'directory') {
+                        for await (const subHandle of handle.values()) {
+                            await processHandle(subHandle, path + handle.name + '/');
+                        }
+                    }
+                }
+
+                await processHandle(dirHandle, ''); // Populate the fileMap
+                const drawable = await parseGltf(gl, fileMap);
+                scene.loadGeometry(drawable);
+                currentShapeLoader = null;
+            } catch (error) {
+                if (error.name !== 'AbortError') { // Ignore errors from user cancelling the dialog
+                    console.error("Failed to load model from directory:", error);
+                    errorConsole.textContent = `GLTF Error: ${error.message}`;
+                    errorConsole.style.display = 'block';
+                }
+            }
+        } else {
+            // Fallback to the old file input for browsers that don't support directory picking
+            console.log("Directory Picker not supported, falling back to file input.");
+            modelFileInput.value = null; // Clear previous selection
+            modelFileInput.click();
+        }
     });
 
-    modelFileInput.addEventListener('change', (event) => {
-        const file = event.target.files[0];
-        if (!file) return;
+    modelFileInput.addEventListener('change', async (event) => {
+        const files = event.target.files;
+        if (!files || files.length === 0) return;
 
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-            try {
-                const arrayBuffer = e.target.result;
-                const drawable = await parseGltf(gl, arrayBuffer);
-                scene.loadGeometry(drawable);
-            } catch (error) {
-                console.error("Failed to load GLTF model:", error);
-                errorConsole.textContent = `GLTF Error: ${error.message}`;
-                errorConsole.style.display = 'block';
+        try {
+            let drawable;
+            // Check if a single zip file was selected
+            if (files.length === 1 && files[0].name.endsWith('.zip')) {
+                if (typeof JSZip === 'undefined') {
+                    throw new Error("JSZip library is not loaded. Cannot process .zip file.");
+                }
+                console.log("Processing .zip file...");
+                const zip = await JSZip.loadAsync(files[0]);
+                const fileMap = new Map();
+                const filePromises = [];
+
+                zip.forEach((relativePath, zipEntry) => {
+                    if (!zipEntry.dir) {
+                        filePromises.push(
+                            zipEntry.async('blob').then(blob => {
+                                fileMap.set(relativePath, new File([blob], zipEntry.name));
+                            })
+                        );
+                    }
+                });
+                await Promise.all(filePromises);
+                drawable = await parseGltf(gl, fileMap);
+            } else {
+                drawable = await parseGltf(gl, files);
             }
-        };
-        reader.onerror = () => console.error("Failed to read file:", reader.error);
-        reader.readAsArrayBuffer(file);
+            scene.loadGeometry(drawable);
+            currentShapeLoader = null; // A loaded model is not a primitive shape
+        } catch (error) {
+            console.error("Failed to load GLTF model:", error);
+            errorConsole.textContent = `GLTF Error: ${error.message}`;
+            errorConsole.style.display = 'block';
+        }
+    });
+
+    loadSampleGltfBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const sampleUrl = 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/main/2.0/BoxTextured/glTF/BoxTextured.gltf';
+        console.log(`Loading sample GLTF from: ${sampleUrl}`);
+        try {
+            const drawable = await parseGltf(gl, sampleUrl);
+            scene.loadGeometry(drawable);
+            currentShapeLoader = null; // A loaded model is not a primitive shape
+        } catch (error) {
+            console.error("Failed to load sample GLTF model:", error);
+            errorConsole.textContent = `Sample GLTF Error: ${error.message}`;
+            errorConsole.style.display = 'block';
+        }
     });
 
     resetSceneBtn.addEventListener('click', async (e) => {
