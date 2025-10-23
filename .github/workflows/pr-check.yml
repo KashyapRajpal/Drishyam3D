@@ -1,0 +1,67 @@
+name: PR checks - small / secret scan
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  file-size-check:
+    name: Check file sizes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for large files (>5MB)
+        run: |
+          echo "Checking for files larger than 5MB in this PR..."
+
+          # Get the base branch
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+
+          # Get list of changed files
+          CHANGED_FILES=$(git diff --name-only \
+            --diff-filter=ACM "$BASE_SHA" "$HEAD_SHA")
+
+          LARGE_FILES_FOUND=0
+
+          for file in $CHANGED_FILES; do
+            if [ -f "$file" ]; then
+              # Get file size in bytes
+              SIZE=$(stat -c%s "$file" 2>/dev/null || \
+                stat -f%z "$file" 2>/dev/null)
+              # 5MB = 5242880 bytes
+              if [ "$SIZE" -gt 5242880 ]; then
+                SIZE_MB=$(echo "scale=2; $SIZE / 1048576" | bc)
+                echo "❌ File too large: $file (${SIZE_MB}MB)"
+                LARGE_FILES_FOUND=1
+              fi
+            fi
+          done
+
+          if [ $LARGE_FILES_FOUND -eq 1 ]; then
+            echo ""
+            echo "Error: One or more files exceed the 5MB limit."
+            echo "Please remove or reduce the size of large files."
+            exit 1
+          else
+            echo "✅ All files are within the 5MB size limit."
+          fi
+
+  gitleaks-scan:
+    name: Scan for secrets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: false
