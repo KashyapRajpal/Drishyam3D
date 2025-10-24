@@ -1,0 +1,5 @@
+# This is a CODEOWNERS file.
+# It defines who is responsible for the code in this repository.
+
+# All files in the repository are owned by @KashyapRajpal
+* @KashyapRajpal
