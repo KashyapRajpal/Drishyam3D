@@ -2,7 +2,7 @@
 
 [![Status: Beta](https://img.shields.io/badge/status-beta-blue.svg)](https://github.com/kashyaprajpal/Drishyam3D)
 
-[**Live Demo (Coming Soon!)**](#)
+[**Try the Live Demo!**](https://kashyaprajpal.github.io/Drishyam3D/html/mainpage.html)
 
 Drishyam3D is a lightweight, browser-based 3D scene editor built with WebGL. It provides a simple interface for writing and testing fragment shaders and scene manipulation scripts in real-time.
 
