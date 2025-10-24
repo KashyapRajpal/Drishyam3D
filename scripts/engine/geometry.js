@@ -149,7 +149,7 @@ export async function createDefaultTexturedCube(gl) {
         // Dynamically import the manifest to avoid browser caching of the version numbers.
         const { assetVersions } = await import(`../../assets/asset-manifest.js?t=${new Date().getTime()}`);
         
-        const texturePath = '../assets/checkerboard-texture.jpg';
+        const texturePath = '../assets/checkerboard-texture.png';
         const version = assetVersions[texturePath];
         let textureUrl;
 
@@ -184,7 +184,7 @@ export async function createTexturedSphere(gl) {
         // Dynamically import the manifest to avoid browser caching of the version numbers.
         const { assetVersions } = await import(`../../assets/asset-manifest.js?t=${new Date().getTime()}`);
         
-        const texturePath = '../assets/checkerboard-texture.jpg';
+        const texturePath = '../assets/checkerboard-texture.png';
         const version = assetVersions[texturePath];
         let textureUrl;
 

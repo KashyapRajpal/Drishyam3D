@@ -5,5 +5,5 @@
  */
 
 export const assetVersions = {
-    '../assets/checkerboard-texture.jpg': '1.1.0', // Increment this when the texture changes
+    '../assets/checkerboard-texture.png': '1.2.0', // Increment this when the texture changes. 
 };
