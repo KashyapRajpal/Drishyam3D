@@ -412,7 +412,6 @@ function init(state) {
 
 function update(state, deltaTime) {
     // This function is called on every frame.
-    translateMatrix(state.modelViewMatrix, [-0.0, 0.0, -6.0]);
     rotateMatrix(state.modelViewMatrix, state.modelRotation, [0, 1, 0]);
     state.modelRotation += deltaTime * 0.5;
 }
@@ -470,6 +469,13 @@ export function setupExplorer(onFileOpen) {
     // ... (explorer.js content)
 }
             </textarea>
+            <textarea id="camera-editor" style="display: none;"></textarea>
+            <textarea id="gltf-parser-editor" style="display: none;"></textarea>
+            <textarea id="matrix-editor" style="display: none;"></textarea>
+            <textarea id="webgl-helpers-editor" style="display: none;"></textarea>
+            <textarea id="settings-editor" style="display: none;"></textarea>
+            <textarea id="menu-handlers-editor" style="display: none;"></textarea>
+            <textarea id="geometry-editor" style="display: none;"></textarea>
             <div id="readonly-warning-banner">&#9888; This file is read-only.</div>
             <div id="editor-footer">
                 <div id="error-console"></div>

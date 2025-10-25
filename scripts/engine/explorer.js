@@ -26,7 +26,8 @@ const fileStructure = [
             { id: 'matrix', name: 'matrix.js', type: 'javascript', readOnly: false, path: '/scripts/engine/matrix.js' },
             { id: 'webgl-helpers', name: 'webgl-helpers.js', type: 'javascript', readOnly: false, path: '/scripts/engine/webgl-helpers.js' },
             { id: 'settings', name: 'settings.js', type: 'javascript', readOnly: false, path: '/scripts/engine/settings.js' },
-            { id: 'menu-handlers', name: 'menu-handlers.js', type: 'javascript', readOnly: false, path: '/scripts/engine/menu-handlers.js' }
+            { id: 'menu-handlers', name: 'menu-handlers.js', type: 'javascript', readOnly: false, path: '/scripts/engine/menu-handlers.js' },
+            { id: 'camera', name: 'camera.js', type: 'javascript', readOnly: false, path: '/scripts/engine/camera.js' }
         ]
     }
 ];

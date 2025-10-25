@@ -4,7 +4,7 @@
  * @license MIT
  */
 
-import { createIdentityMatrix, createPerspectiveMatrix } from './matrix.js';
+import { createIdentityMatrix, createPerspectiveMatrix, createLookAtMatrix, multiplyMatrices } from './matrix.js';
 
 function resizeCanvas(canvas) {
     const displayWidth  = canvas.clientWidth;
@@ -16,7 +16,7 @@ function resizeCanvas(canvas) {
     }
 }
 
-export function createScene(gl, canvas) {
+export function createScene(gl, canvas, camera) {
     // Create a 1x1 white texture to use for models without textures
     const defaultTexture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, defaultTexture);
@@ -71,10 +71,18 @@ export function createScene(gl, canvas) {
         const zFar = 100.0;
         const projectionMatrix = createPerspectiveMatrix(fieldOfView, aspect, zNear, zFar);
 
-        const modelViewMatrix = createIdentityMatrix();
-        sceneState.modelViewMatrix = modelViewMatrix;
+        // Update the camera matrix and get the view matrix
+        camera.updateViewMatrix();
+        const viewMatrix = camera.getViewMatrix();
+
+        // The model matrix is separate and will be modified by the user script
+        const modelMatrix = createIdentityMatrix();
+        sceneState.modelViewMatrix = modelMatrix; // Pass the model matrix to the user script
 
         userScript.update(sceneState, deltaTime);
+
+        // Multiply the view matrix and model matrix to get the final model-view matrix
+        const modelViewMatrix = multiplyMatrices(viewMatrix, modelMatrix);
 
         // Set vertex attributes
         {

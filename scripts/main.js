@@ -14,6 +14,7 @@ import { parseGltf } from './engine/gltf-parser.js';
 import { setupExplorer } from './engine/explorer.js';
 import { setupSettings } from './engine/settings.js';
 import { setupMenuHandlers } from './engine/menu-handlers.js';
+import { Camera } from './engine/camera.js';
 import { createScene } from './engine/scene.js';
 
 window.onload = function() {
@@ -25,6 +26,7 @@ window.onload = function() {
     let isAutoRefreshEnabled = false;
     let autoRefreshTimer = null;
     let scene = null; // Declare scene in a higher scope
+    let camera = null; // Declare camera in a higher scope
 
     function runUpdates() {
         updateShader();
@@ -36,7 +38,7 @@ window.onload = function() {
     function resetAutoRefreshTimer() {
         clearTimeout(autoRefreshTimer);
         if (isAutoRefreshEnabled) {
-            autoRefreshTimer = setTimeout(runUpdates, 10000); // 10 seconds
+            autoRefreshTimer = setTimeout(runUpdates, 3000); // 3 seconds
         }
     }
 
@@ -108,7 +110,7 @@ window.onload = function() {
         try {
             // Use a Function constructor to safely parse the user code.
             // It should return an object with init and update methods.
-            const scriptModule = new Function('translateMatrix', 'rotateMatrix', `${scriptCode}\n return { init, update };`)(translateMatrix, rotateMatrix);
+            const scriptModule = new Function('translateMatrix', 'rotateMatrix', 'camera', `${scriptCode}\n return { init, update };`)(translateMatrix, rotateMatrix, camera);
 
             if (scriptModule && typeof scriptModule.init === 'function' && typeof scriptModule.update === 'function') {
                 scene.updateUserScript(scriptModule);
@@ -131,14 +133,17 @@ window.onload = function() {
             return;
         }
 
-        scene = createScene(gl, canvas);
+        // Initialize the camera
+        camera = new Camera(canvas, [0, 0, 5]);
+
+        scene = createScene(gl, canvas, camera);
 
         // Always initialize with the default, untextured cube.
         const cubeGeometry = createDefaultCube(gl);
         scene.loadGeometry(cubeGeometry);
 
         // Setup menu handlers
-        setupMenuHandlers({ gl, scene, settings, updateScript });
+        setupMenuHandlers({ gl, scene, settings, camera, updateScript });
 
         // Open the default project files and wait for them to be ready.
         const openFilePromises = explorer.getProjectFiles().map(file => {
