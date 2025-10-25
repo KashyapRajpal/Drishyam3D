@@ -16,6 +16,7 @@ import { createDefaultCube, createDefaultTexturedCube, createSphere } from './ge
  * @param {function} options.updateScript - Callback to re-run the scene script.
  */
 export function setupMenuHandlers({ gl, scene, settings, updateScript }) {
+    const shapesMenu = document.querySelector('#shapes-menu-container');
     const errorConsole = document.querySelector("#error-console");
     const importModelBtn = document.querySelector('#import-model-btn');
     const modelFileInput = document.querySelector('#model-file-input');
@@ -53,6 +54,7 @@ export function setupMenuHandlers({ gl, scene, settings, updateScript }) {
                 const drawable = await parseGltf(gl, fileMap);
                 scene.loadGeometry(drawable);
                 currentShapeLoader = null;
+                shapesMenu.classList.add('disabled');
             } catch (error) {
                 if (error.name !== 'AbortError') { // Ignore errors from user cancelling the dialog
                     console.error("Failed to load model from directory:", error);
@@ -100,6 +102,7 @@ export function setupMenuHandlers({ gl, scene, settings, updateScript }) {
             }
             scene.loadGeometry(drawable);
             currentShapeLoader = null; // A loaded model is not a primitive shape
+            shapesMenu.classList.add('disabled');
         } catch (error) {
             console.error("Failed to load GLTF model:", error);
             errorConsole.textContent = `GLTF Error: ${error.message}`;
@@ -115,6 +118,7 @@ export function setupMenuHandlers({ gl, scene, settings, updateScript }) {
             const drawable = await parseGltf(gl, sampleUrl);
             scene.loadGeometry(drawable);
             currentShapeLoader = null; // A loaded model is not a primitive shape
+            shapesMenu.classList.add('disabled');
         } catch (error) {
             console.error("Failed to load sample GLTF model:", error);
             errorConsole.textContent = `Sample GLTF Error: ${error.message}`;
@@ -128,6 +132,7 @@ export function setupMenuHandlers({ gl, scene, settings, updateScript }) {
         const cube = createDefaultCube(gl);
         scene.loadGeometry(cube);
         updateScript();
+        shapesMenu.classList.remove('disabled');
         console.log("Scene reset to default cube.");
     });
 

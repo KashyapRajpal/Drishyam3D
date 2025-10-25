@@ -303,3 +303,8 @@ body {
     flex-shrink: 0;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
+
+.menu-container.disabled {
+    pointer-events: none;
+    opacity: 0.5;
+}
