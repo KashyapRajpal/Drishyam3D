@@ -493,6 +493,34 @@ export function setupExplorer(onFileOpen) {
     <!-- JSZip for handling .zip file imports -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
-    <script type="module" src="../scripts/main.js"></script>
+    <script id="main-script" type="module"></script>
+
+    <!--
+      Runtime base resolver:
+      - Locally (dev) it resolves to relative ../ paths when mainpage.html is inside html/
+      - On GitHub Pages (username.github.io/repo) it resolves to "/<repo>/..."
+      This avoids hardcoding repo paths and keeps local testing intact.
+    -->
+    <script>
+    (function () {
+        // NOTE: update repoPrefix only if you move/rename the repo
+        const repoPrefix = '/Drishyam3D';
+        const hostname = location.hostname || '';
+        const isGithubPages = hostname.endsWith('.github.io');
+        // Expose helper for resolver; other scripts can call this
+        window.__DRISHYAM_ASSET = function (p) {
+            // Accept both leading-slash and no-leading-slash inputs
+            if (!p) return p;
+            if (p.startsWith('/')) p = p.slice(1);
+            if (isGithubPages) {
+                return repoPrefix + '/' + p;
+            }
+            // Local/dev: if the page is under /html/ (html/mainpage.html) then assets are one level up
+            return '../' + p;
+        };
+        // Dynamically set the src for the main script module
+        document.getElementById('main-script').src = window.__DRISHYAM_ASSET('scripts/main.js');
+    })();
+    </script>
 </body>
 </html>
