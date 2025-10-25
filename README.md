@@ -77,6 +77,29 @@ The editor is divided into three main panels and a top menu bar.
     *   Click the **Run** button in the editor footer.
     *   Alternatively, check the **Auto Refresh** box, and your changes will be applied automatically 10 seconds after you stop typing.
 
+## Roadmap
+
+The goal of Drishyam3D is to evolve into a forward-looking platform for modern, high-performance web graphics. Development is organized into three focused phases: a foundational UI/UX overhaul, migration of the rendering core to WebGPU, and the addition of advanced rendering capabilities such as neural rendering and hardware-accelerated ray tracing.
+
+### Phase 1: Foundational UI/UX Overhaul
+
+The current vanilla JavaScript front-end will be migrated to a modern, component-based web framework (e.g., React). This will create a more scalable, maintainable, and robust architecture for the editor's user interface, setting the stage for more complex features.
+
+### Phase 2: Next-Generation Rendering Engine
+
+The core rendering engine will be migrated from WebGL to **WebGPU**. This is a foundational step to unlock significant performance improvements and modern GPU capabilities. Key benefits include:
+*   **High-Performance Rendering**: Lower CPU overhead for more complex scenes.
+*   **Compute Shaders**: Native support for general-purpose GPU (GPGPU) workloads, enabling high-performance simulations and parallel data processing directly on the GPU.
+
+### Phase 3: Advanced Rendering Capabilities
+
+Building on the new WebGPU engine, we will implement support for cutting-edge rendering techniques. The goals for this phase include:
+
+*   **Neural Rendering (Gaussian Splatting)**: Implement a renderer for 3D Gaussian Splatting, enabling the loading and real-time display of scenes captured with neural rendering methods.
+*   **Hardware-Accelerated Ray Tracing**: Integrate support for real-time ray tracing for photorealistic lighting, shadows, and reflections. (Note: This relies on an experimental WebGPU extension and is a forward-looking goal).
+
+
+
 ## Contributing
 
 Contributions are welcome! Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before participating. If you have a feature request, bug report, or want to contribute code, please feel free to open an issue or submit a pull request.
