@@ -20,6 +20,14 @@ Drishyam3D is a lightweight, browser-based 3D scene editor built with WebGL. It 
 
 ## How to Run
 
+### Prerequisites
+
+- **Node.js and npm**: These are required for managing project dependencies and running development tools. If you are on macOS, you can install them using [Homebrew](https://brew.sh/):
+  ```bash
+  brew install node
+  ```
+  For other operating systems, please download it from the [official Node.js website](https://nodejs.org/).
+
 This project uses modern JavaScript modules (`import`/`export`), which have specific security requirements in web browsers. Therefore, **you must run it using a local web server.** Opening the `mainpage.html` file directly from your filesystem (`file:///...`) will not work.
 
 **Why is a server required?**

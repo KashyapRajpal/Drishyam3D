@@ -51,7 +51,7 @@ function createAndBindTexture(gl, image) {
  * @param {number} componentType The GLTF component type.
  * @returns {number} The corresponding WebGL constant.
  */
-function getWebGLComponentType(componentType) {
+export function getWebGLComponentType(componentType) {
     switch (componentType) {
         case 5120: return WebGLRenderingContext.BYTE;
         case 5121: return WebGLRenderingContext.UNSIGNED_BYTE;
@@ -70,7 +70,7 @@ function getWebGLComponentType(componentType) {
  * @param {object} accessor The GLTF accessor object.
  * @returns {TypedArray} The extracted typed array.
  */
-function getBufferViewData(bufferData, bufferView, accessor) {
+export function getBufferViewData(bufferData, bufferView, accessor) {
     const byteOffset = (bufferView.byteOffset || 0) + (accessor.byteOffset || 0);
     
     let elementCount;
