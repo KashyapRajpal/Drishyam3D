@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" href="../assets/logo/drishyam3d_logo.png" type="image/png">
+    <link rel="icon" id="favicon-link" href="" type="image/png">
     <title>Drishyam3D</title>
     <!-- CodeMirror CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.css">
@@ -348,8 +348,8 @@
     </style>
 </head>
 <body>
-    <header id="main-header">
-        <img src="../assets/logo/drishyam3d_logo.png" alt="Drishyam3D Logo" class="logo-img">
+    <header id="main-header"> 
+        <img id="logo-img" src="" alt="Drishyam3D Logo" class="logo-img">
         <div class="menu-bar">
             <div id="file-menu-container" class="menu-container">
                 <div class="menu-item">File</div>
@@ -520,6 +520,8 @@ export function setupExplorer(onFileOpen) {
         };
         // Dynamically set the src for the main script module
         document.getElementById('main-script').src = window.__DRISHYAM_ASSET('scripts/main.js');
+        document.getElementById('favicon-link').href = window.__DRISHYAM_ASSET('assets/logo/drishyam3d_logo.png');
+        document.getElementById('logo-img').src = window.__DRISHYAM_ASSET('assets/logo/drishyam3d_logo.png');
     })();
     </script>
 </body>

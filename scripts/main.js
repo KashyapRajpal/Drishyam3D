@@ -142,7 +142,8 @@ window.onload = function() {
 
         // Open the default project files and wait for them to be ready.
         const openFilePromises = explorer.getProjectFiles().map(file => {
-            return editorManager.openEditor(file.id, file.name, file.type, file.readOnly, file.path);
+            const resolvedPath = file.path ? window.__DRISHYAM_ASSET(file.path) : null;
+            return editorManager.openEditor(file.id, file.name, file.type, file.readOnly, resolvedPath);
         });
         await Promise.all(openFilePromises);
 
