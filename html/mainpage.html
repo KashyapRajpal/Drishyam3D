@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" id="favicon-link" href="" type="image/png">
+    <title>Drishyam3D</title>
+    <!-- CodeMirror CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/theme/dracula.min.css">
+    <!-- End CodeMirror CSS -->
+
+    <link rel="stylesheet" id="main-stylesheet" href="">
+</head>
+<body>
+    <header id="main-header"> 
+        <img id="logo-img" src="" alt="Drishyam3D Logo" class="logo-img">
+        <div class="menu-bar">
+            <div id="file-menu-container" class="menu-container">
+                <div class="menu-item">File</div>
+                <div class="dropdown-content">
+                    <a href="#" id="import-model-btn">Import (.zip, .gltf)...</a>
+                    <div class="menu-separator"></div>
+                    <a href="#" id="load-sample-gltf-btn">Load Sample Model</a>
+                    <div class="menu-separator"></div>
+                    <a href="#" id="reset-scene-btn">Reset Scene</a>
+                </div>
+            </div>
+            <div id="shapes-menu-container" class="menu-container">
+                <div class="menu-item">Shapes</div>
+                <div class="dropdown-content">
+                    <a href="#" id="shape-textured-toggle" class="menu-checkbox">
+                        <input type="checkbox" id="shape-textured-checkbox">
+                        <label for="shape-textured-checkbox">Textured</label>
+                    </a>
+                    <div class="menu-separator"></div>
+                    <a href="#" id="shape-cube-btn">Cube</a>
+                    <a href="#" id="shape-sphere-btn">Sphere</a>
+                    <div class="menu-separator"></div>
+                    <a href="#" class="disabled">Cone (soon)</a>
+                    <a href="#" class="disabled">Cylinder (soon)</a>
+                    <a href="#" class="disabled">Trapezoid (soon)</a>
+                </div>
+            </div>
+            <div id="settings-menu-container" class="menu-container">
+                <div class="menu-item">Settings</div>
+                <div class="dropdown-content">
+                    <a href="#" class="disabled">No settings available</a>
+                </div>
+            </div>
+        </div>
+        <input type="file" id="model-file-input" style="display: none;" accept=".zip,.gltf,.glb,.bin,.png,.jpg,.jpeg" multiple>
+    </header>
+    <main id="content-wrapper">
+        <div id="explorer-panel">
+            <div id="explorer-header">Explorer</div>
+            <div id="explorer-list"></div>
+        </div>
+        <div id="viewport">
+            <canvas id="glcanvas"></canvas>
+        </div>
+        <div id="editor-panel">
+            <div id="editor-header">
+                <div class="editor-tabs"></div>
+            </div>
+            <textarea id="vertex-editor" style="display: none;"></textarea>
+            <textarea id="fragment-editor" style="display: none;"></textarea>
+            <textarea id="script-editor" style="display: none;">
+// The 'state' object is passed from the main application.
+// 'state' contains: modelViewMatrix, projectionMatrix
+// 'deltaTime' is the time in seconds since the last frame.
+
+function init(state) {
+    // This function is called once when the script is loaded.
+    state.modelRotation = 0.0;
+}
+
+function update(state, deltaTime) {
+    // This function is called on every frame.
+    rotateMatrix(state.modelViewMatrix, state.modelRotation, [0, 1, 0]);
+    state.modelRotation += deltaTime * 0.5;
+}
+            </textarea>
+            <!-- Engine Scripts (Read-Only) -->
+            <textarea id="main-editor" style="display: none;">
+import {
+    translateMatrix,
+    rotateMatrix
+} from './matrix.js';
+import { initShaderProgram } from './webgl-helpers.js';
+import { setupEditors } from './editor.js';
+import { setupExplorer } from './explorer.js';
+import { createScene } from './scene.js';
+
+window.onload = function() {
+    // ... (main.js content)
+};
+            </textarea>
+            <textarea id="scene-editor" style="display: none;">
+import { createIdentityMatrix, createPerspectiveMatrix } from './matrix.js';
+import { initCubeBuffers } from './geometry.js';
+
+function resizeCanvas(canvas) {
+    // ... (scene.js content)
+}
+
+export function createScene(gl, canvas) {
+    // ... (scene.js content)
+}
+            </textarea>
+            <textarea id="editor-editor" style="display: none;">
+/**
+ * Initializes the CodeMirror editors and sets up UI event listeners.
+ * @param {function} onRun - The callback function to execute when the "Run" button is clicked.
+ */
+export function setupEditors(onRun) {
+    // ... (editor.js content)
+}
+            </textarea>
+            <textarea id="explorer-editor" style="display: none;">
+const projectFiles = [
+    // ... (explorer.js content)
+];
+
+const engineFiles = [
+    // ... (explorer.js content)
+];
+
+/**
+ * Sets up the file explorer panel.
+ * @param {function(fileId, fileName, fileType, readOnly, path): void} onFileOpen - Callback to run when a file is double-clicked.
+ */
+export function setupExplorer(onFileOpen) {
+    // ... (explorer.js content)
+}
+            </textarea>
+            <textarea id="camera-editor" style="display: none;"></textarea>
+            <textarea id="gltf-parser-editor" style="display: none;"></textarea>
+            <textarea id="matrix-editor" style="display: none;"></textarea>
+            <textarea id="webgl-helpers-editor" style="display: none;"></textarea>
+            <textarea id="settings-editor" style="display: none;"></textarea>
+            <textarea id="menu-handlers-editor" style="display: none;"></textarea>
+            <textarea id="geometry-editor" style="display: none;"></textarea>
+            <div id="readonly-warning-banner">&#9888; This file is read-only.</div>
+            <div id="editor-footer">
+                <div id="error-console"></div>
+                <div id="auto-refresh-container" title="When enabled, the viewport will automatically refresh 10 seconds after you stop typing.">
+                    <input type="checkbox" id="auto-refresh-checkbox">
+                    <label for="auto-refresh-checkbox">Auto Refresh</label>
+                </div>
+                <button id="reload-button">Run</button>
+            </div>
+        </div>
+    </main>
+    <!-- CodeMirror JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/clike/clike.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/javascript/javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/edit/closebrackets.min.js"></script>
+    <!-- End CodeMirror JS -->
+
+    <!-- GLTF Loader -->
+
+    <!-- JSZip for handling .zip file imports -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <script id="main-script" type="module"></script>
+
+    <!--
+      Runtime base resolver:
+      - Locally (dev) it resolves to relative ../ paths when mainpage.html is inside html/
+      - On GitHub Pages (username.github.io/repo) it resolves to "/<repo>/..."
+      This avoids hardcoding repo paths and keeps local testing intact.
+    -->
+    <script>
+    (function () {
+        // NOTE: update repoPrefix only if you move/rename the repo
+        const repoPrefix = '/Drishyam3D';
+        const hostname = location.hostname || '';
+        const isGithubPages = hostname.endsWith('.github.io');
+        // Expose helper for resolver; other scripts can call this
+        window.__DRISHYAM_ASSET = function (p) {
+            // Accept both leading-slash and no-leading-slash inputs
+            if (!p) return p;
+            if (p.startsWith('/')) p = p.slice(1);
+            if (isGithubPages) {
+                return repoPrefix + '/' + p;
+            }
+            // Local/dev: if the page is under /html/ (html/mainpage.html) then assets are one level up
+            return '../' + p;
+        };
+        // Dynamically set the src for the main script module
+        document.getElementById('main-script').src = window.__DRISHYAM_ASSET('scripts/main.js');
+        document.getElementById('favicon-link').href = window.__DRISHYAM_ASSET('assets/logo/drishyam3d_logo.png');
+        document.getElementById('logo-img').src = window.__DRISHYAM_ASSET('assets/logo/drishyam3d_logo.png');
+        document.getElementById('main-stylesheet').href = window.__DRISHYAM_ASSET('css/style.css');
+    })();
+    </script>
+</body>
+</html>
