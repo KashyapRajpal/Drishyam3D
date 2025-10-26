@@ -1,0 +1,9 @@
+/**
+ * @file A manifest of asset versions for cache busting.
+ * @copyright 2025 Kashyap Rajpal
+ * @license MIT
+ */
+
+export const assetVersions = {
+    '../assets/checkerboard-texture.png': '1.2.0', // Increment this when the texture changes. 
+};
