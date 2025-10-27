@@ -105,28 +105,17 @@
 
     <!--
       Runtime base resolver:
-      - Locally (dev) it resolves to relative ../ paths when mainpage.html is inside html/
-      - On GitHub Pages (username.github.io/repo) it resolves to "/<repo>/..."
-      This avoids hardcoding repo paths and keeps local testing intact.
+      Resolves asset paths to be relative to the parent directory of the current page.
+      This allows the application to work correctly when `mainpage.html` is in a subdirectory like `/html`.
     -->
     <script>
     (function () {
-        // NOTE: update repoPrefix only if you move/rename the repo
-        const repoPrefix = '/Drishyam3D';
-        const hostname = location.hostname || '';
-        const isGithubPages = hostname.endsWith('.github.io');
-        // Expose helper for resolver; other scripts can call this
         window.__DRISHYAM_ASSET = function (p) {
-            // Accept both leading-slash and no-leading-slash inputs
             if (!p) return p;
             if (p.startsWith('/')) p = p.slice(1);
-            if (isGithubPages) {
-                return repoPrefix + '/' + p;
-            }
-            // Local/dev: if the page is under /html/ (html/mainpage.html) then assets are one level up
             return '../' + p;
         };
-        // Dynamically set the src for the main script module
+
         document.getElementById('main-script').src = window.__DRISHYAM_ASSET('scripts/main.js');
         document.getElementById('favicon-link').href = window.__DRISHYAM_ASSET('assets/logo/drishyam3d_logo.png');
         document.getElementById('logo-img').src = window.__DRISHYAM_ASSET('assets/logo/drishyam3d_logo.png');
