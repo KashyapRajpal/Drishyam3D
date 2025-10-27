@@ -6,7 +6,7 @@
 const fileStructure = [
     {
         name: 'Project Files', type: 'folder', children: [
-            { id: 'script', name: 'scene-script.js', type: 'javascript', readOnly: false },
+            { id: 'script', name: 'scene-script.js', type: 'javascript', readOnly: false, path: '/scripts/scene-script.js' },
         ]
     },
     {

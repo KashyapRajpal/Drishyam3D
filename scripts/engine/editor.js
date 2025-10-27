@@ -90,8 +90,9 @@ export function setupEditors(onRun, onEditorChange) {
         // --- IMPORTANT: Populate textArea.value BEFORE CodeMirror.fromTextArea ---
         if (path) {
             try {
-                const response = await fetch(path);
-                if (!response.ok) throw new Error(`Failed to fetch ${path}`);
+                const resolvedPath = window.__DRISHYAM_ASSET(path);
+                const response = await fetch(resolvedPath);
+                if (!response.ok) throw new Error(`Failed to fetch ${resolvedPath}`);
                 const text = await response.text();
                 textArea.value = text;
             } catch (err) {

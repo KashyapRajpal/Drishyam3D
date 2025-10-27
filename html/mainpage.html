@@ -65,75 +65,12 @@
             </div>
             <textarea id="vertex-editor" style="display: none;"></textarea>
             <textarea id="fragment-editor" style="display: none;"></textarea>
-            <textarea id="script-editor" style="display: none;">
-// The 'state' object is passed from the main application.
-// 'state' contains: modelViewMatrix, projectionMatrix
-// 'deltaTime' is the time in seconds since the last frame.
-
-function init(state) {
-    // This function is called once when the script is loaded.
-    state.modelRotation = 0.0;
-}
-
-function update(state, deltaTime) {
-    // This function is called on every frame.
-    rotateMatrix(state.modelViewMatrix, state.modelRotation, [0, 1, 0]);
-    state.modelRotation += deltaTime * 0.5;
-}
-            </textarea>
+            <textarea id="script-editor" style="display: none;"></textarea>
             <!-- Engine Scripts (Read-Only) -->
-            <textarea id="main-editor" style="display: none;">
-import {
-    translateMatrix,
-    rotateMatrix
-} from './matrix.js';
-import { initShaderProgram } from './webgl-helpers.js';
-import { setupEditors } from './editor.js';
-import { setupExplorer } from './explorer.js';
-import { createScene } from './scene.js';
-
-window.onload = function() {
-    // ... (main.js content)
-};
-            </textarea>
-            <textarea id="scene-editor" style="display: none;">
-import { createIdentityMatrix, createPerspectiveMatrix } from './matrix.js';
-import { initCubeBuffers } from './geometry.js';
-
-function resizeCanvas(canvas) {
-    // ... (scene.js content)
-}
-
-export function createScene(gl, canvas) {
-    // ... (scene.js content)
-}
-            </textarea>
-            <textarea id="editor-editor" style="display: none;">
-/**
- * Initializes the CodeMirror editors and sets up UI event listeners.
- * @param {function} onRun - The callback function to execute when the "Run" button is clicked.
- */
-export function setupEditors(onRun) {
-    // ... (editor.js content)
-}
-            </textarea>
-            <textarea id="explorer-editor" style="display: none;">
-const projectFiles = [
-    // ... (explorer.js content)
-];
-
-const engineFiles = [
-    // ... (explorer.js content)
-];
-
-/**
- * Sets up the file explorer panel.
- * @param {function(fileId, fileName, fileType, readOnly, path): void} onFileOpen - Callback to run when a file is double-clicked.
- */
-export function setupExplorer(onFileOpen) {
-    // ... (explorer.js content)
-}
-            </textarea>
+            <textarea id="main-editor" style="display: none;"></textarea>
+            <textarea id="scene-editor" style="display: none;"></textarea>
+            <textarea id="editor-editor" style="display: none;"></textarea>
+            <textarea id="explorer-editor" style="display: none;"></textarea>
             <textarea id="camera-editor" style="display: none;"></textarea>
             <textarea id="gltf-parser-editor" style="display: none;"></textarea>
             <textarea id="matrix-editor" style="display: none;"></textarea>
