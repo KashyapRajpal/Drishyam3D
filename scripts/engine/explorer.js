@@ -74,7 +74,8 @@ export function setupExplorer(onFileOpen) {
                 itemElement.textContent = item.name;
                 itemElement.dataset.fileId = item.id;
                 itemElement.addEventListener('dblclick', () => {
-                    onFileOpen(item.id, item.name, item.type, item.readOnly, item.path);
+                    const resolvedPath = window.__DRISHYAM_ASSET(item.path);
+                    onFileOpen(item.id, item.name, item.type, item.readOnly, resolvedPath);
                 });
                 container.appendChild(itemElement);
             }
