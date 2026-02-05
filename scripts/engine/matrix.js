@@ -61,6 +61,7 @@ export function rotateMatrix(matrix, angle, axis) {
     matrix[11] = a03 * b20 + a13 * b21 + a23 * b22;
 }
 
+
 export function createLookAtMatrix(eye, target, up) {
     let z0 = eye[0] - target[0], z1 = eye[1] - target[1], z2 = eye[2] - target[2];
     let len = 1 / Math.hypot(z0, z1, z2);

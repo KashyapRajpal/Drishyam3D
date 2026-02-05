@@ -4,6 +4,8 @@
  * @license MIT
  */
 
+import { assetVersions } from '../../assets/asset-manifest.js';
+
 export function initCubeBuffers(gl) {
     // Create a buffer for the cube's vertex positions.
     const positionBuffer = gl.createBuffer();
@@ -123,6 +125,25 @@ function isPowerOf2(value) {
     return (value & (value - 1)) === 0;
 }
 
+function resolveTextureUrl() {
+    const manifestKey = '../assets/checkerboard-texture.png';
+    // Default to manifest key (works in original app when __DRISHYAM_ASSET is present)
+    let baseUrl = manifestKey;
+
+    if (typeof window !== 'undefined' && typeof window.__DRISHYAM_ASSET === 'function') {
+        baseUrl = window.__DRISHYAM_ASSET('assets/checkerboard-texture.png');
+    } else {
+        // Vite/ESM friendly resolution
+        try {
+            baseUrl = new URL('../../assets/checkerboard-texture.png', import.meta.url).toString();
+        } catch (e) {
+            // Keep fallback
+        }
+    }
+
+    return { baseUrl, manifestKey };
+}
+
 /**
  * Creates the default cube drawable object for the scene.
  * @param {WebGLRenderingContext} gl The WebGL context.
@@ -143,21 +164,16 @@ export function createDefaultCube(gl) {
  * @returns {Promise<{buffers: object, texture: WebGLTexture, vertexCount: number}>}
  */
 export async function createDefaultTexturedCube(gl) {
-    // This function is now async because it needs to dynamically import the asset manifest.
-    // We do this to ensure we always get the latest version of the manifest itself.
     try {
-        // Dynamically import the manifest to avoid browser caching of the version numbers.
-        const { assetVersions } = await import(`../../assets/asset-manifest.js?t=${new Date().getTime()}`);
-        
-        const texturePath = '../assets/checkerboard-texture.png';
-        const version = assetVersions[texturePath];
+        const { baseUrl, manifestKey } = resolveTextureUrl();
+        const version = assetVersions[manifestKey];
         let textureUrl;
 
         if (version) {
-            textureUrl = `${texturePath}?v=${version}`;
+            textureUrl = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}v=${version}`;
         } else {
-            console.warn(`No version found for ${texturePath}. Falling back to timestamp.`);
-            textureUrl = `${texturePath}?t=${new Date().getTime()}`;
+            console.warn(`No version found for ${manifestKey}. Falling back to timestamp.`);
+            textureUrl = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}t=${new Date().getTime()}`;
         }
 
         const texture = await loadTexture(gl, textureUrl);
@@ -181,18 +197,14 @@ export async function createDefaultTexturedCube(gl) {
  */
 export async function createTexturedSphere(gl) {
     try {
-        // Dynamically import the manifest to avoid browser caching of the version numbers.
-        const { assetVersions } = await import(`../../assets/asset-manifest.js?t=${new Date().getTime()}`);
-        
-        const texturePath = '../assets/checkerboard-texture.png';
-        const version = assetVersions[texturePath];
-        let textureUrl;
+        const { baseUrl, manifestKey } = resolveTextureUrl();
+        const version = assetVersions[manifestKey];
+        let textureUrl = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}t=${new Date().getTime()}`;
 
         if (version) {
-            textureUrl = `${texturePath}?v=${version}`;
+            textureUrl = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}v=${version}`;
         } else {
-            console.warn(`No version found for ${texturePath}. Falling back to timestamp.`);
-            textureUrl = `${texturePath}?t=${new Date().getTime()}`;
+            console.warn(`No version found for ${manifestKey}. Falling back to timestamp.`);
         }
 
         const texture = await loadTexture(gl, textureUrl);

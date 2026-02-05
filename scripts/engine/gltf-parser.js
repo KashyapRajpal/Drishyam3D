@@ -120,6 +120,11 @@ export async function parseGltf(gl, source) {
     let baseUrl = '';
     const localFileMap = new Map();
 
+    function listAvailableFiles(limit = 10) {
+        const keys = Array.from(localFileMap.keys());
+        return keys.slice(0, limit);
+    }
+
     if (typeof source === 'string') {
         // Assume source is a URL to a .gltf file
         const response = await fetch(source);
@@ -185,7 +190,7 @@ export async function parseGltf(gl, source) {
             if (!bufferResponse.ok) throw new Error(`Failed to fetch binary buffer from ${baseUrl + buffer.uri}`);
             binaryBufferData = await bufferResponse.arrayBuffer();
         } else {
-            throw new Error(`Cannot resolve buffer URI: ${buffer.uri}. Make sure all required files are selected.`);
+            throw new Error(`Cannot resolve buffer URI: ${buffer.uri}. baseUrl=${baseUrl || '(empty)'}; available files (sample): ${listAvailableFiles().join(', ')}`);
         }
     } else {
         throw new Error("Embedded GLTF buffers are not yet supported by this simple loader.");
@@ -195,7 +200,25 @@ export async function parseGltf(gl, source) {
 
     const positions = getBufferViewData(binaryBufferData, bufferViews[positionAccessor.bufferView], positionAccessor);
     const normals = getBufferViewData(binaryBufferData, bufferViews[normalAccessor.bufferView], normalAccessor);
-    const indices = getBufferViewData(binaryBufferData, bufferViews[indicesAccessor.bufferView], indicesAccessor);
+    let indices = getBufferViewData(binaryBufferData, bufferViews[indicesAccessor.bufferView], indicesAccessor);
+
+    // Handle 32-bit indices for WebGL1
+    let indexType = getWebGLComponentType(indicesAccessor.componentType);
+    if (indicesAccessor.componentType === 5125) { // UNSIGNED_INT
+        const ext = gl.getExtension('OES_element_index_uint');
+        if (!ext) {
+            let maxIndex = 0;
+            for (let i = 0; i < indices.length; i += 1) {
+                if (indices[i] > maxIndex) maxIndex = indices[i];
+            }
+            if (maxIndex <= 65535) {
+                indices = new Uint16Array(indices);
+                indexType = WebGLRenderingContext.UNSIGNED_SHORT;
+            } else {
+                throw new Error('Model uses 32-bit indices not supported by this device.');
+            }
+        }
+    }
 
     const positionBuffer = createAndBindBuffer(gl, gl.ARRAY_BUFFER, positions);
     const normalBuffer = createAndBindBuffer(gl, gl.ARRAY_BUFFER, normals);
@@ -230,7 +253,7 @@ export async function parseGltf(gl, source) {
             } else if (baseUrl) {
                 imageUrl = baseUrl + imageSource.uri;
             } else {
-                throw new Error(`Cannot resolve image URI: ${imageSource.uri}. Make sure all required files are selected.`);
+                throw new Error(`Cannot resolve image URI: ${imageSource.uri}. baseUrl=${baseUrl || '(empty)'}; available files (sample): ${listAvailableFiles().join(', ')}`);
             }
 
             const image = new Image();
@@ -246,14 +269,43 @@ export async function parseGltf(gl, source) {
         }
     }
 
+    // Compute bounds for camera framing (no scaling applied)
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    for (let i = 0; i < positions.length; i += 3) {
+        const x = positions[i];
+        const y = positions[i + 1];
+        const z = positions[i + 2];
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (z < minZ) minZ = z;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+        if (z > maxZ) maxZ = z;
+    }
+    const center = [(minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2];
+    const dx = maxX - minX;
+    const dy = maxY - minY;
+    const dz = maxZ - minZ;
+    const radius = Math.max(dx, dy, dz) / 2 || 1;
+
     const drawable = {
         buffers: buffers,
         texture: texture,
         vertexCount: indicesAccessor.count,
-        indexType: getWebGLComponentType(indicesAccessor.componentType), // Use the WebGL constant
+        indexType: indexType, // Use resolved index type (handles 32-bit indices)
+        bounds: { center, radius },
     };
 
-    console.log("GLTF model parsed successfully:", drawable);
+    // Attach some diagnostic counts so the renderer can inspect buffer sizes.
+    // These are element counts (not byte lengths).
+    drawable._debug = {
+        positionElementCount: positions.length,
+        normalElementCount: normals.length,
+        indexElementCount: indices.length,
+    };
+
+    console.log("GLTF model parsed successfully:", drawable, drawable._debug);
     return drawable;
 }
 
