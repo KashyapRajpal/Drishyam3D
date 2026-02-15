@@ -16,6 +16,8 @@ function resizeCanvas(canvas) {
     }
 }
 
+let _drawable = null; // Module-level drawable shared across scene instance
+    
 export function createScene(gl, canvas, camera) {
     // Create a 1x1 white texture to use for models without textures
     const defaultTexture = gl.createTexture();
@@ -30,9 +32,6 @@ export function createScene(gl, canvas, camera) {
     const pixel = new Uint8Array([255, 255, 255, 255]);  // opaque white
     gl.texImage2D(gl.TEXTURE_2D, level, internalFormat, width, height, border, srcFormat, srcType, pixel);
 
-    let drawable = null; // Will hold { buffers, vertexCount }
-    let lastDrawable = null;
-
     let programInfo = null;
     let userScript = {
         init: () => {},
@@ -41,6 +40,26 @@ export function createScene(gl, canvas, camera) {
 
     // Optional debug unlit program used to quickly verify raw geometry visibility.
     let _unlitProgramInfo = null;
+
+    function getDrawableName(d) {
+        if (!d) return '(none)';
+        if (d._debug && d._debug.name) return d._debug.name;
+        return '(unnamed)';
+    }
+
+    function getDrawable() {
+        return _drawable;
+    }
+
+    function setDrawable(nextDrawable, logSource = 'setDrawable') {
+        if (nextDrawable === _drawable) return false;
+        console.log(`${logSource}: previous drawable was`, getDrawableName(_drawable));
+        _drawable = nextDrawable;
+        console.log(`${logSource}: drawable set to`, getDrawableName(_drawable));
+        requestAnimationFrame(render);
+        forceUpdate({ reinitScript: true });
+        return true;
+    }
 
     function _createUnlitProgram() {
         const vsSource = `attribute vec3 aVertexPosition;
@@ -104,7 +123,7 @@ export function createScene(gl, canvas, camera) {
             // Schedule a one-time retry on the next animation frame using the
             // currently-stored `drawable` reference, but avoid spinning.
             requestAnimationFrame(() => {
-                if (d === drawable) {
+                if (d === _drawable) {
                     try {
                         debugDrawUnlit(d);
                     } catch (e) {
@@ -185,20 +204,7 @@ export function createScene(gl, canvas, camera) {
         const deltaTime = now - then;
         then = now;
 
-        if (drawable !== lastDrawable) {
-            if (drawable) {
-                console.log('Scene render using drawable:', drawable);
-                if (programInfo) {
-                    console.log('Current program attribLocations:', programInfo.attribLocations);
-                } else {
-                    console.log('No programInfo available yet.');
-                }
-                if (drawable._debug) {
-                    console.log('Drawable debug counts:', drawable._debug);
-                }
-            }
-            lastDrawable = drawable;
-        }
+        const drawable = getDrawable();
 
         // Exit if we don't have a drawable object or a shader program
         if (!programInfo || !drawable) {
@@ -317,31 +323,33 @@ export function createScene(gl, canvas, camera) {
 
     return {
         start: () => {
+            console.log('start() called. Current drawable name:', getDrawableName(getDrawable()));
+            
             forceUpdate({ reinitScript: true });
+
+            console.log('start() completed. Current drawable name:', getDrawableName(getDrawable()));
+            
         },
         updateProgramInfo: (newProgramInfo) => {
+            console.log('updateProgramInfo called. Current drawable name:', getDrawableName(getDrawable()));
+            
             programInfo = newProgramInfo;
             forceUpdate();
+
+            console.log('updateProgramInfo completed. Current drawable name:', getDrawableName(getDrawable()));
+            
         },
         updateUserScript: (newUserScript) => {
+            console.trace('updateUserScript stack');
+            console.log('updateUserScript called. Current drawable name:', getDrawableName(getDrawable()));
             userScript = newUserScript;
-            forceUpdate({ reinitScript: true });
+            forceUpdate({ reinitScript: false });
+            console.log('updateUserScript completed. Current drawable name:', getDrawableName(getDrawable()));
         },
+        getDrawable: () => getDrawable(),
         loadGeometry: (newDrawable) => {
-            drawable = newDrawable;
-            // Perform a one-time unlit debug draw to help surface raw geometry issues.
-            // Schedule on the next animation frame so that any async buffer setup
-            // (if present) has a chance to complete and we won't access nulls.
-            if (newDrawable) {
-                requestAnimationFrame(() => {
-                    try {
-                        debugDrawUnlit(drawable);
-                    } catch (e) {
-                        console.warn('Debug unlit draw failed:', e);
-                    }
-                });
-            }
-            forceUpdate({ reinitScript: true });
+            const updated = setDrawable(newDrawable, 'loadGeometry');
+            console.trace('loadGeometry stack');
         }
     };
 }

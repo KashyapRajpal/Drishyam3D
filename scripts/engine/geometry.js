@@ -155,6 +155,9 @@ export function createDefaultCube(gl) {
         texture: null, // Explicitly untextured
         vertexCount: 36,
         indexType: gl.UNSIGNED_SHORT, // Our cube uses Uint16Array
+        _debug: {
+            name: 'cube',
+        },
     };
 }
 
@@ -182,6 +185,9 @@ export async function createDefaultTexturedCube(gl) {
             texture: texture,
             vertexCount: 36,
             indexType: gl.UNSIGNED_SHORT,
+            _debug: {
+                name: 'textured cube',
+            },
         };
     } catch (error) {
         console.error("Could not create default textured cube:", error);
@@ -211,6 +217,10 @@ export async function createTexturedSphere(gl) {
         const sphereGeometry = createSphere(gl); // Re-use the sphere creation logic
 
         sphereGeometry.texture = texture; // Attach the loaded texture
+        sphereGeometry._debug = {
+            ...(sphereGeometry._debug || {}),
+            name: 'textured sphere',
+        };
         return sphereGeometry;
     } catch (error) {
         console.error("Could not create default textured sphere:", error);
@@ -289,5 +299,8 @@ export function createSphere(gl, radius = 1, latitudeBands = 30, longitudeBands 
         texture: null,
         vertexCount: indexData.length,
         indexType: gl.UNSIGNED_SHORT, // Our sphere uses Uint16Array
+        _debug: {
+            name: 'sphere',
+        },
     };
 }

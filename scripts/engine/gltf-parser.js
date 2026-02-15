@@ -119,6 +119,7 @@ export async function parseGltf(gl, source) {
     let gltfJson;
     let baseUrl = '';
     const localFileMap = new Map();
+    let sourceName = 'gltf';
 
     function listAvailableFiles(limit = 10) {
         const keys = Array.from(localFileMap.keys());
@@ -131,6 +132,9 @@ export async function parseGltf(gl, source) {
         if (!response.ok) throw new Error(`Failed to fetch GLTF from ${source}: ${response.statusText}`);
         gltfJson = await response.json();
         baseUrl = source.substring(0, source.lastIndexOf('/') + 1);
+        const urlParts = source.split('/');
+        const fileName = urlParts[urlParts.length - 1] || '';
+        sourceName = fileName.replace(/\.[^/.]+$/, '') || 'gltf';
     } else if (source instanceof FileList || source instanceof Map) {
         // Find the main .gltf or .glb file
         let mainFilePath = Array.from(source.keys()).find(path => path.endsWith('.gltf') || path.endsWith('.glb'));
@@ -146,6 +150,9 @@ export async function parseGltf(gl, source) {
 
         const fileBuffer = await mainFile.arrayBuffer();
         gltfJson = JSON.parse(new TextDecoder('utf-8').decode(fileBuffer));
+
+        const mainFileName = mainFilePath.split('/').pop() || mainFilePath;
+        sourceName = mainFileName.replace(/\.[^/.]+$/, '') || 'gltf';
 
         // The source is already a map of paths to files, so we can use it directly.
         source.forEach((value, key) => localFileMap.set(key, value));
@@ -300,6 +307,7 @@ export async function parseGltf(gl, source) {
     // Attach some diagnostic counts so the renderer can inspect buffer sizes.
     // These are element counts (not byte lengths).
     drawable._debug = {
+        name: sourceName,
         positionElementCount: positions.length,
         normalElementCount: normals.length,
         indexElementCount: indices.length,
