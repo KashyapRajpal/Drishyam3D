@@ -30,9 +30,19 @@ global.document = {
 };
 
 describe('WebGL Helpers', () => {
-    beforeEach(() => {
-        jest.clearAllMocks();
-    });
+  let consoleErrorSpy;
+
+  beforeAll(() => {
+    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterAll(() => {
+    consoleErrorSpy.mockRestore();
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
   test('initShaderProgram should return a shader program on success', () => {
     mockGl.getShaderParameter.mockReturnValue(true);
     mockGl.getProgramParameter.mockReturnValue(true);

@@ -60,8 +60,21 @@ global.requestAnimationFrame = jest.fn();
 
 describe('Scene', () => {
     let scene;
+    let consoleLogSpy;
+    let consoleTraceSpy;
+
+    beforeAll(() => {
+        consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+        consoleTraceSpy = jest.spyOn(console, 'trace').mockImplementation(() => {});
+    });
+
+    afterAll(() => {
+        consoleLogSpy.mockRestore();
+        consoleTraceSpy.mockRestore();
+    });
 
     beforeEach(() => {
+        requestAnimationFrame.mockClear();
         scene = createScene(mockGl, mockCanvas, mockCamera);
     });
 
@@ -70,6 +83,7 @@ describe('Scene', () => {
         expect(scene).toHaveProperty('updateProgramInfo');
         expect(scene).toHaveProperty('updateUserScript');
         expect(scene).toHaveProperty('loadGeometry');
+        expect(scene).toHaveProperty('getDrawable');
     });
 
     test('updateProgramInfo should update the program info', () => {
@@ -102,9 +116,29 @@ describe('Scene', () => {
             indexType: 'UNSIGNED_SHORT',
         };
         scene.loadGeometry(newDrawable);
-        // We can't directly access the internal drawable,
-        // but we can check if the render loop is called without errors.
+        expect(scene.getDrawable()).toBe(newDrawable);
         scene.start();
         expect(requestAnimationFrame).toHaveBeenCalled();
+    });
+
+    test('updateUserScript should not change the drawable', () => {
+        const newDrawable = {
+            buffers: {
+                position: 'pos',
+                normal: 'norm',
+                indices: 'ind',
+            },
+            vertexCount: 36,
+            indexType: 'UNSIGNED_SHORT',
+        };
+        scene.loadGeometry(newDrawable);
+
+        const newUserScript = {
+            init: jest.fn(),
+            update: jest.fn(),
+        };
+        scene.updateUserScript(newUserScript);
+
+        expect(scene.getDrawable()).toBe(newDrawable);
     });
 });
