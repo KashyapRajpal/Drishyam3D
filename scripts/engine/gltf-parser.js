@@ -119,6 +119,12 @@ export async function parseGltf(gl, source) {
     let gltfJson;
     let baseUrl = '';
     const localFileMap = new Map();
+    let sourceName = 'gltf';
+
+    function listAvailableFiles(limit = 10) {
+        const keys = Array.from(localFileMap.keys());
+        return keys.slice(0, limit);
+    }
 
     if (typeof source === 'string') {
         // Assume source is a URL to a .gltf file
@@ -126,6 +132,9 @@ export async function parseGltf(gl, source) {
         if (!response.ok) throw new Error(`Failed to fetch GLTF from ${source}: ${response.statusText}`);
         gltfJson = await response.json();
         baseUrl = source.substring(0, source.lastIndexOf('/') + 1);
+        const urlParts = source.split('/');
+        const fileName = urlParts[urlParts.length - 1] || '';
+        sourceName = fileName.replace(/\.[^/.]+$/, '') || 'gltf';
     } else if (source instanceof FileList || source instanceof Map) {
         // Find the main .gltf or .glb file
         let mainFilePath = Array.from(source.keys()).find(path => path.endsWith('.gltf') || path.endsWith('.glb'));
@@ -141,6 +150,9 @@ export async function parseGltf(gl, source) {
 
         const fileBuffer = await mainFile.arrayBuffer();
         gltfJson = JSON.parse(new TextDecoder('utf-8').decode(fileBuffer));
+
+        const mainFileName = mainFilePath.split('/').pop() || mainFilePath;
+        sourceName = mainFileName.replace(/\.[^/.]+$/, '') || 'gltf';
 
         // The source is already a map of paths to files, so we can use it directly.
         source.forEach((value, key) => localFileMap.set(key, value));
@@ -185,7 +197,7 @@ export async function parseGltf(gl, source) {
             if (!bufferResponse.ok) throw new Error(`Failed to fetch binary buffer from ${baseUrl + buffer.uri}`);
             binaryBufferData = await bufferResponse.arrayBuffer();
         } else {
-            throw new Error(`Cannot resolve buffer URI: ${buffer.uri}. Make sure all required files are selected.`);
+            throw new Error(`Cannot resolve buffer URI: ${buffer.uri}. baseUrl=${baseUrl || '(empty)'}; available files (sample): ${listAvailableFiles().join(', ')}`);
         }
     } else {
         throw new Error("Embedded GLTF buffers are not yet supported by this simple loader.");
@@ -195,7 +207,25 @@ export async function parseGltf(gl, source) {
 
     const positions = getBufferViewData(binaryBufferData, bufferViews[positionAccessor.bufferView], positionAccessor);
     const normals = getBufferViewData(binaryBufferData, bufferViews[normalAccessor.bufferView], normalAccessor);
-    const indices = getBufferViewData(binaryBufferData, bufferViews[indicesAccessor.bufferView], indicesAccessor);
+    let indices = getBufferViewData(binaryBufferData, bufferViews[indicesAccessor.bufferView], indicesAccessor);
+
+    // Handle 32-bit indices for WebGL1
+    let indexType = getWebGLComponentType(indicesAccessor.componentType);
+    if (indicesAccessor.componentType === 5125) { // UNSIGNED_INT
+        const ext = gl.getExtension('OES_element_index_uint');
+        if (!ext) {
+            let maxIndex = 0;
+            for (let i = 0; i < indices.length; i += 1) {
+                if (indices[i] > maxIndex) maxIndex = indices[i];
+            }
+            if (maxIndex <= 65535) {
+                indices = new Uint16Array(indices);
+                indexType = WebGLRenderingContext.UNSIGNED_SHORT;
+            } else {
+                throw new Error('Model uses 32-bit indices not supported by this device.');
+            }
+        }
+    }
 
     const positionBuffer = createAndBindBuffer(gl, gl.ARRAY_BUFFER, positions);
     const normalBuffer = createAndBindBuffer(gl, gl.ARRAY_BUFFER, normals);
@@ -230,7 +260,7 @@ export async function parseGltf(gl, source) {
             } else if (baseUrl) {
                 imageUrl = baseUrl + imageSource.uri;
             } else {
-                throw new Error(`Cannot resolve image URI: ${imageSource.uri}. Make sure all required files are selected.`);
+                throw new Error(`Cannot resolve image URI: ${imageSource.uri}. baseUrl=${baseUrl || '(empty)'}; available files (sample): ${listAvailableFiles().join(', ')}`);
             }
 
             const image = new Image();
@@ -246,14 +276,44 @@ export async function parseGltf(gl, source) {
         }
     }
 
+    // Compute bounds for camera framing (no scaling applied)
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    for (let i = 0; i < positions.length; i += 3) {
+        const x = positions[i];
+        const y = positions[i + 1];
+        const z = positions[i + 2];
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (z < minZ) minZ = z;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+        if (z > maxZ) maxZ = z;
+    }
+    const center = [(minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2];
+    const dx = maxX - minX;
+    const dy = maxY - minY;
+    const dz = maxZ - minZ;
+    const radius = Math.max(dx, dy, dz) / 2 || 1;
+
     const drawable = {
         buffers: buffers,
         texture: texture,
         vertexCount: indicesAccessor.count,
-        indexType: getWebGLComponentType(indicesAccessor.componentType), // Use the WebGL constant
+        indexType: indexType, // Use resolved index type (handles 32-bit indices)
+        bounds: { center, radius },
     };
 
-    console.log("GLTF model parsed successfully:", drawable);
+    // Attach some diagnostic counts so the renderer can inspect buffer sizes.
+    // These are element counts (not byte lengths).
+    drawable._debug = {
+        name: sourceName,
+        positionElementCount: positions.length,
+        normalElementCount: normals.length,
+        indexElementCount: indices.length,
+    };
+
+    console.log("GLTF model parsed successfully:", drawable, drawable._debug);
     return drawable;
 }
 
