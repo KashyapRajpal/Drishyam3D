@@ -130,12 +130,23 @@ function resolveTextureUrl() {
     // Default to manifest key (works in original app when __DRISHYAM_ASSET is present)
     let baseUrl = manifestKey;
 
+    function getImportMetaUrl() {
+        try {
+            return new Function('return import.meta.url')();
+        } catch (e) {
+            return null;
+        }
+    }
+
     if (typeof window !== 'undefined' && typeof window.__DRISHYAM_ASSET === 'function') {
         baseUrl = window.__DRISHYAM_ASSET('assets/checkerboard-texture.png');
     } else {
-        // Vite/ESM friendly resolution
+        // Vite/ESM friendly resolution (guarded for non-ESM/Jest)
         try {
-            baseUrl = new URL('../../assets/checkerboard-texture.png', import.meta.url).toString();
+            const metaUrl = getImportMetaUrl();
+            if (metaUrl) {
+                baseUrl = new URL('../../assets/checkerboard-texture.png', metaUrl).toString();
+            }
         } catch (e) {
             // Keep fallback
         }

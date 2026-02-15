@@ -60,6 +60,18 @@ global.requestAnimationFrame = jest.fn();
 
 describe('Scene', () => {
     let scene;
+    let consoleLogSpy;
+    let consoleTraceSpy;
+
+    beforeAll(() => {
+        consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+        consoleTraceSpy = jest.spyOn(console, 'trace').mockImplementation(() => {});
+    });
+
+    afterAll(() => {
+        consoleLogSpy.mockRestore();
+        consoleTraceSpy.mockRestore();
+    });
 
     beforeEach(() => {
         requestAnimationFrame.mockClear();
