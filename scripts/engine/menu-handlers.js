@@ -5,7 +5,6 @@
  */
 
 import { parseGltf } from './gltf-parser.js';
-import { createDefaultCube, createDefaultTexturedCube, createSphere } from './geometry.js';
 
 /**
  * Sets up the event handlers for the main menu bar.
@@ -15,7 +14,7 @@ import { createDefaultCube, createDefaultTexturedCube, createSphere } from './ge
  * @param {object} options.settings - The settings manager object.
  * @param {function} options.updateScript - Callback to re-run the scene script.
  */
-export function setupMenuHandlers({ gl, scene, settings, updateScript, camera }) {
+export function setupMenuHandlers({ gl, scene, settings, updateScript, camera, geometryFactory }) {
     const shapesMenu = document.querySelector('#shapes-menu-container');
     const errorConsole = document.querySelector("#error-console");
     const importZipBtn = document.querySelector('#import-zip-btn');
@@ -269,31 +268,24 @@ export function setupMenuHandlers({ gl, scene, settings, updateScript, camera })
 
     const onResetScene = async (e) => {
         e.preventDefault();
-        // Resetting the scene now defaults to the simple cube.
-        const cube = createDefaultCube(gl);
-        console.log('onResetScene. Loading cube.');
+        const cube = geometryFactory.createCube();
         scene.loadGeometry(cube);
         updateScript();
         shapesMenu.classList.remove('disabled');
-        console.log("Scene reset to default cube.");
     };
     resetSceneBtn.addEventListener('click', onResetScene);
 
     // --- Shape Loading Handlers ---
     const loadCube = async () => {
         const isTextured = shapeTexturedCheckbox.checked;
-        const cube = isTextured ? await createDefaultTexturedCube(gl) : createDefaultCube(gl);
+        const cube = isTextured ? await geometryFactory.createTexturedCube() : geometryFactory.createCube();
         scene.loadGeometry(cube);
-        console.log(`shape loadCube called.`);
-        console.log(`Loaded: ${isTextured ? 'Textured' : 'Default'} Cube`);
     };
 
     const loadSphere = async () => {
         const isTextured = shapeTexturedCheckbox.checked;
-        const sphere = isTextured ? await createTexturedSphere(gl) : createSphere(gl);
+        const sphere = isTextured ? await geometryFactory.createTexturedSphere() : geometryFactory.createSphere();
         scene.loadGeometry(sphere);
-        console.log(`shape loadSphere called.`);
-        console.log(`Loaded: ${isTextured ? 'Textured' : 'Default'} Sphere`);
     };
 
     const onShapeCube = (e) => { e.preventDefault(); currentShapeLoader = loadCube; currentShapeLoader(); };
