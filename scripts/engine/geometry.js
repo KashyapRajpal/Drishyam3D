@@ -180,7 +180,7 @@ function loadTexture(gl, url) {
             }
             resolve(texture);
         };
-        image.onerror = (err) => {
+        image.onerror = () => {
             reject(new Error(`Failed to load texture: ${url}`));
         };
         image.src = url;
@@ -191,7 +191,7 @@ function isPowerOf2(value) {
     return (value & (value - 1)) === 0;
 }
 
-function resolveTextureUrl() {
+export function resolveTextureUrl() {
     const manifestKey = '../assets/checkerboard-texture.png';
     // Default to manifest key (works in original app when __DRISHYAM_ASSET is present)
     let baseUrl = manifestKey;
@@ -241,19 +241,17 @@ export function createDefaultCube(gl) {
 /**
  * Creates the default textured cube drawable object for the scene.
  * @param {WebGLRenderingContext} gl The WebGL context.
+ * @param {string} [textureUrl] Explicit texture URL (Vite-resolved). Falls back to resolveTextureUrl() if omitted.
  * @returns {Promise<{buffers: object, texture: WebGLTexture, vertexCount: number}>}
  */
-export async function createDefaultTexturedCube(gl) {
+export async function createDefaultTexturedCube(gl, textureUrl) {
     try {
-        const { baseUrl, manifestKey } = resolveTextureUrl();
-        const version = assetVersions[manifestKey];
-        let textureUrl;
-
-        if (version) {
-            textureUrl = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}v=${version}`;
-        } else {
-            console.warn(`No version found for ${manifestKey}. Falling back to timestamp.`);
-            textureUrl = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}t=${new Date().getTime()}`;
+        if (!textureUrl) {
+            const { baseUrl, manifestKey } = resolveTextureUrl();
+            const version = assetVersions[manifestKey];
+            textureUrl = version
+                ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}v=${version}`
+                : `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}t=${Date.now()}`;
         }
 
         const texture = await loadTexture(gl, textureUrl);
@@ -262,13 +260,10 @@ export async function createDefaultTexturedCube(gl) {
             texture: texture,
             vertexCount: 36,
             indexType: gl.UNSIGNED_SHORT,
-            _debug: {
-                name: 'textured cube',
-            },
+            _debug: { name: 'textured cube' },
         };
     } catch (error) {
         console.error("Could not create default textured cube:", error);
-        // Fallback to an untextured cube if texture loading fails
         return createDefaultCube(gl);
     }
 }
@@ -276,32 +271,27 @@ export async function createDefaultTexturedCube(gl) {
 /**
  * Creates a textured sphere drawable object.
  * @param {WebGLRenderingContext} gl The WebGL context.
+ * @param {string} [textureUrl] Explicit texture URL (Vite-resolved). Falls back to resolveTextureUrl() if omitted.
  * @returns {Promise<{buffers: object, texture: WebGLTexture, vertexCount: number}>}
  */
-export async function createTexturedSphere(gl) {
+export async function createTexturedSphere(gl, textureUrl) {
     try {
-        const { baseUrl, manifestKey } = resolveTextureUrl();
-        const version = assetVersions[manifestKey];
-        let textureUrl = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}t=${new Date().getTime()}`;
-
-        if (version) {
-            textureUrl = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}v=${version}`;
-        } else {
-            console.warn(`No version found for ${manifestKey}. Falling back to timestamp.`);
+        if (!textureUrl) {
+            const { baseUrl, manifestKey } = resolveTextureUrl();
+            const version = assetVersions[manifestKey];
+            textureUrl = version
+                ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}v=${version}`
+                : `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}t=${Date.now()}`;
         }
 
         const texture = await loadTexture(gl, textureUrl);
-        const sphereGeometry = createSphere(gl); // Re-use the sphere creation logic
-
-        sphereGeometry.texture = texture; // Attach the loaded texture
-        sphereGeometry._debug = {
-            ...(sphereGeometry._debug || {}),
-            name: 'textured sphere',
-        };
+        const sphereGeometry = createSphere(gl);
+        sphereGeometry.texture = texture;
+        sphereGeometry._debug = { ...(sphereGeometry._debug || {}), name: 'textured sphere' };
         return sphereGeometry;
     } catch (error) {
         console.error("Could not create default textured sphere:", error);
-        return createSphere(gl); // Fallback to untextured sphere
+        return createSphere(gl);
     }
 }
 

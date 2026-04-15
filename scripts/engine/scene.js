@@ -16,9 +16,10 @@ function resizeCanvas(canvas) {
     }
 }
 
-let _drawable = null; // Module-level drawable shared across scene instance
-    
 export function createScene(gl, canvas, camera) {
+    // Scene-instance scoped: async callbacks holding a reference to a
+    // previous scene cannot corrupt this scene's drawable state.
+    let _drawable = null;
     // Create a 1x1 white texture to use for models without textures
     const defaultTexture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, defaultTexture);
@@ -187,8 +188,10 @@ export function createScene(gl, canvas, camera) {
     };
 
     let then = 0;
+    let active = true; // Set to false by destroy() to stop this scene's render loop
 
     function forceUpdate({ reinitScript = false } = {}) {
+        if (!active) return;
         if (reinitScript) {
             try {
                 userScript.init(sceneState);
@@ -200,6 +203,7 @@ export function createScene(gl, canvas, camera) {
     }
 
     function render(now) {
+        if (!active) return;
         now *= 0.001; // Convert to seconds
         const deltaTime = now - then;
         then = now;
@@ -350,6 +354,10 @@ export function createScene(gl, canvas, camera) {
         loadGeometry: (newDrawable) => {
             const updated = setDrawable(newDrawable, 'loadGeometry');
             console.trace('loadGeometry stack');
-        }
+        },
+        destroy: () => {
+            active = false;
+            _drawable = null;
+        },
     };
 }

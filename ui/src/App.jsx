@@ -5,20 +5,25 @@ import 'codemirror/theme/dracula.css'
 import 'codemirror/mode/javascript/javascript'
 import 'codemirror/mode/clike/clike'
 import { initEngine } from '@engine/app-facade.js'
+import { createDefaultCube, createDefaultTexturedCube, createSphere, createTexturedSphere } from '@engine/geometry.js'
+import { createWebGPUGeometryFactory } from '@engine/webgpu-facade.js'
+import checkerboardTextureUrl from '@assets/checkerboard-texture.png'
 import defaultVert from '@assets/shaders/default.vert?raw'
 import defaultFrag from '@assets/shaders/default.frag?raw'
+import defaultWgsl from '@assets/shaders/default.wgsl?raw'
 import defaultScript from '@scripts/scene-script.js?raw'
 import logoPng from '@assets/logo/drishyam3d_logo.png'
 import { setupMenuHandlers } from '@engine/menu-handlers.js'
 import { setupSettings } from '@engine/settings.js'
 
-const shaderFiles = import.meta.glob('../../assets/shaders/**/*.{vert,frag,glsl}', { query: '?raw', import: 'default', eager: true })
+const shaderFiles = import.meta.glob('../../assets/shaders/**/*.{vert,frag,glsl,wgsl}', { query: '?raw', import: 'default', eager: true })
 const engineFiles = import.meta.glob('../../scripts/engine/**/*.js', { query: '?raw', import: 'default', eager: true })
 const sceneFilesAll = import.meta.glob('../../scripts/**/*.js', { query: '?raw', import: 'default', eager: true })
 const sceneFiles = Object.fromEntries(Object.entries(sceneFilesAll).filter(([path]) => !path.includes('/engine/')))
 
 const defaultVertPath = Object.keys(shaderFiles).find((p) => p.endsWith('default.vert'))
 const defaultFragPath = Object.keys(shaderFiles).find((p) => p.endsWith('default.frag'))
+const defaultWgslPath = Object.keys(shaderFiles).find((p) => p.endsWith('default.wgsl'))
 const sceneScriptPath = Object.keys(sceneFiles).find((p) => p.endsWith('scene-script.js'))
 
 function normalizePath(p) {
@@ -110,13 +115,17 @@ export default function App(){
     let cancelled = false
 
     async function boot() {
-      if (backend !== 'webgl') return
       const canvas = canvasRef.current
       if (!canvas) return
 
+      const shaderSources = backend === 'webgpu'
+        ? { wgsl: fileContents[defaultWgslPath] ?? defaultWgsl }
+        : { vertex: fileContents[defaultVertPath], fragment: fileContents[defaultFragPath] }
+
       const engine = await initEngine({
         canvas,
-        shaderSources: { vertex: fileContents[defaultVertPath], fragment: fileContents[defaultFragPath] },
+        backend,
+        shaderSources,
         scriptSource: fileContents[sceneScriptPath],
         onError: (err) => {
           if (!cancelled) setError(err?.message || String(err))
@@ -127,7 +136,15 @@ export default function App(){
       let cleanupMenu = null
       try {
         const settingsMgr = setupSettings((k,v)=>{})
-        cleanupMenu = setupMenuHandlers({ gl: engine.gl, scene: engine.scene, settings: settingsMgr, updateScript: () => { applyScript() }, camera: engine.camera })
+        const geometryFactory = backend === 'webgpu'
+          ? createWebGPUGeometryFactory(engine.device, checkerboardTextureUrl)
+          : {
+              createCube: () => createDefaultCube(engine.gl),
+              createTexturedCube: () => createDefaultTexturedCube(engine.gl, checkerboardTextureUrl),
+              createSphere: () => createSphere(engine.gl),
+              createTexturedSphere: () => createTexturedSphere(engine.gl, checkerboardTextureUrl),
+            }
+        cleanupMenu = setupMenuHandlers({ gl: engine.gl, scene: engine.scene, settings: settingsMgr, updateScript: () => { applyScript() }, camera: engine.camera, geometryFactory })
       } catch (e) {
         // If menu handlers expect DOM elements, they should now be present; log any error.
         console.warn('Menu handlers setup failed:', e)
@@ -144,11 +161,15 @@ export default function App(){
 
     return () => {
       cancelled = true
-      if (engineRef.current && typeof engineRef.current._cleanupMenu === 'function') {
-        try { engineRef.current._cleanupMenu() } catch (e) { /* ignore */ }
-        delete engineRef.current._cleanupMenu
+      if (engineRef.current) {
+        if (typeof engineRef.current.destroy === 'function') {
+          try { engineRef.current.destroy() } catch (e) { /* ignore */ }
+        }
+        if (typeof engineRef.current._cleanupMenu === 'function') {
+          try { engineRef.current._cleanupMenu() } catch (e) { /* ignore */ }
+        }
+        engineRef.current = null
       }
-      engineRef.current = null
     }
   }, [backend])
 
@@ -156,15 +177,21 @@ export default function App(){
   function applyShaders() {
     const e = engineRef.current
     if (!e) return setError('Engine not initialized')
-    const ok = e.setShaders(fileContents[defaultVertPath], fileContents[defaultFragPath])
+    const ok = backend === 'webgpu'
+      ? e.setShaders(fileContents[defaultWgslPath] ?? defaultWgsl)
+      : e.setShaders(fileContents[defaultVertPath], fileContents[defaultFragPath])
     if (!ok) setError('Shader compilation failed')
     else {
       setError(null)
-      setLastApplied((prev) => ({
-        ...prev,
-        [defaultVertPath]: fileContents[defaultVertPath],
-        [defaultFragPath]: fileContents[defaultFragPath]
-      }))
+      if (backend === 'webgpu') {
+        setLastApplied((prev) => ({ ...prev, [defaultWgslPath]: fileContents[defaultWgslPath] }))
+      } else {
+        setLastApplied((prev) => ({
+          ...prev,
+          [defaultVertPath]: fileContents[defaultVertPath],
+          [defaultFragPath]: fileContents[defaultFragPath]
+        }))
+      }
     }
   }
 
@@ -184,7 +211,7 @@ export default function App(){
 
   const [activeTab, setActiveTab] = useState(sceneScriptPath || '')
   const [autoRefresh, setAutoRefresh] = useState(false)
-  const [openTabs, setOpenTabs] = useState(() => [sceneScriptPath, defaultVertPath, defaultFragPath].filter(Boolean))
+  const [openTabs, setOpenTabs] = useState(() => [sceneScriptPath, defaultVertPath, defaultFragPath, defaultWgslPath].filter(Boolean))
 
   const fileContentMap = {
     ...shaderFiles,
@@ -197,8 +224,9 @@ export default function App(){
     if (sceneScriptPath) defaults[sceneScriptPath] = defaultScript
     if (defaultVertPath) defaults[defaultVertPath] = defaultVert
     if (defaultFragPath) defaults[defaultFragPath] = defaultFrag
+    if (defaultWgslPath) defaults[defaultWgslPath] = defaultWgsl
     return defaults
-  }, [sceneScriptPath, defaultVertPath, defaultFragPath])
+  }, [sceneScriptPath, defaultVertPath, defaultFragPath, defaultWgslPath])
 
   const [fileContents, setFileContents] = useState(() => ({ ...editableDefaults }))
   const [lastApplied, setLastApplied] = useState(() => ({ ...editableDefaults }))
@@ -221,7 +249,17 @@ export default function App(){
     })
   }, [editableDefaults])
 
-  const shaderTree = buildTree(shaderFiles, 'assets/shaders/')
+  // Only show shader files relevant to the active backend
+  const visibleShaderFiles = useMemo(() => {
+    return Object.fromEntries(
+      Object.entries(shaderFiles).filter(([path]) => {
+        if (backend === 'webgpu') return path.endsWith('.wgsl')
+        return path.endsWith('.vert') || path.endsWith('.frag') || path.endsWith('.glsl')
+      })
+    )
+  }, [backend])
+
+  const shaderTree = buildTree(visibleShaderFiles, 'assets/shaders/')
   const engineTree = buildTree(engineFiles, 'scripts/engine/')
   const sceneTree = buildTree(sceneFiles, 'scripts/')
 
@@ -248,7 +286,7 @@ export default function App(){
   }, [activeTab, sceneScriptPath])
 
   function isEditable(path) {
-    return path === sceneScriptPath || path === defaultVertPath || path === defaultFragPath
+    return path === sceneScriptPath || path === defaultVertPath || path === defaultFragPath || path === defaultWgslPath
   }
 
   const dirtyMap = useMemo(() => {
@@ -282,7 +320,8 @@ export default function App(){
   }
 
   function handleApply() {
-    if (resolvedActiveTab === defaultVertPath || resolvedActiveTab === defaultFragPath) applyShaders()
+    if (resolvedActiveTab === defaultWgslPath) applyShaders()
+    else if (resolvedActiveTab === defaultVertPath || resolvedActiveTab === defaultFragPath) applyShaders()
     else if (resolvedActiveTab === sceneScriptPath) applyScript()
   }
 
@@ -319,6 +358,16 @@ export default function App(){
         />
       )
     }
+    if (resolvedActiveTab === defaultWgslPath) {
+      return (
+        <CodeEditor
+          value={fileContents[defaultWgslPath]}
+          onChange={(val) => setFileContents((prev) => ({ ...prev, [defaultWgslPath]: val }))}
+          mode="javascript"
+          readOnly={false}
+        />
+      )
+    }
 
     const readOnlyValue = fileContentMap[resolvedActiveTab] || ''
     return (
@@ -331,8 +380,24 @@ export default function App(){
     )
   }
 
+  function isRelevantFile(path) {
+    if (path.endsWith('.vert') || path.endsWith('.frag') || path.endsWith('.glsl')) return backend === 'webgl'
+    if (path.endsWith('.wgsl')) return backend === 'webgpu'
+    return true
+  }
+
+  // Close irrelevant shader tabs whenever the backend changes
+  useEffect(() => {
+    setOpenTabs((prev) => {
+      const next = prev.filter(isRelevantFile)
+      return next.length > 0 ? next : [sceneScriptPath].filter(Boolean)
+    })
+    setActiveTab((prev) => (isRelevantFile(prev) ? prev : sceneScriptPath || ''))
+  }, [backend])
+
   // Explorer open file
   function openFile(fileId) {
+    if (!isRelevantFile(fileId)) return
     if (!openTabs.includes(fileId)) setOpenTabs([...openTabs, fileId])
     setActiveTab(fileId)
   }
@@ -439,7 +504,9 @@ export default function App(){
           <div id="settings-menu-container" className="menu-container">
             <div className="menu-item">Settings</div>
             <div className="dropdown-content">
-              <a href="#" className="disabled">No settings available</a>
+              <div className="menu-label" style={{padding:'4px 12px',opacity:0.6,fontSize:'0.8em',userSelect:'none'}}>Renderer</div>
+              <a href="#" style={backend === 'webgl' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setBackend('webgl') }}>WebGL</a>
+              <a href="#" style={backend === 'webgpu' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setBackend('webgpu') }}>WebGPU</a>
             </div>
           </div>
         </nav>
@@ -469,7 +536,7 @@ export default function App(){
 
         <section className="center-panel">
           <div className="viewport-canvas-wrap">
-            <canvas ref={canvasRef} className="viewport-canvas" id="glcanvas" />
+            <canvas key={backend} ref={canvasRef} className="viewport-canvas" id="glcanvas" />
             <input type="file" id="model-file-input" style={{display:'none'}} accept=".zip,.gltf" multiple />
           </div>
         </section>
