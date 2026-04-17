@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l \"/Users/kashyaprajpal/Desktop/Personal Projects/Drishyam3D/scripts/engine\"/*.js)",
+      "Bash(git -C \"/Users/kashyaprajpal/Desktop/Personal Projects/Drishyam3D\" status --short)",
+      "Bash(git -C \"/Users/kashyaprajpal/Desktop/Personal Projects/Drishyam3D\" log --oneline -10)",
+      "Bash(npm run:*)"
+    ],
+    "additionalDirectories": [
+      "/Users/kashyaprajpal/Desktop/Personal Projects/Drishyam3D"
+    ]
+  }
+}
