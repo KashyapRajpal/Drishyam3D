@@ -13,8 +13,14 @@ import defaultFrag from '@assets/shaders/default.frag?raw'
 import defaultWgsl from '@assets/shaders/default.wgsl?raw'
 import defaultScript from '@scripts/scene-script.js?raw'
 import logoPng from '@assets/logo/drishyam3d_logo.png'
-import { setupMenuHandlers } from '@engine/menu-handlers.js'
 import { setupSettings } from '@engine/settings.js'
+import {
+  loadShape,
+  resetScene as resetSceneOp,
+  loadSampleGltf,
+  importZipFile,
+  importFolderHandle,
+} from '@engine/scene-ops.js'
 
 const shaderFiles = import.meta.glob('../../assets/shaders/**/*.{vert,frag,glsl,wgsl}', { query: '?raw', import: 'default', eager: true })
 const engineFiles = import.meta.glob('../../scripts/engine/**/*.js', { query: '?raw', import: 'default', eager: true })
@@ -108,8 +114,14 @@ function CodeEditor({ value, onChange, mode, readOnly }) {
 export default function App(){
   const [backend, setBackend] = useState('webgl')
   const [error, setError] = useState(null)
+  const [textured, setTextured] = useState(false)
+  const [currentShape, setCurrentShape] = useState('cube')
+  const [hasModelLoaded, setHasModelLoaded] = useState(false)
+  const [engineReady, setEngineReady] = useState(0)
   const canvasRef = useRef(null)
   const engineRef = useRef(null)
+  const geometryFactoryRef = useRef(null)
+  const pickerActiveRef = useRef(false)
 
   useEffect(()=>{
     let cancelled = false
@@ -131,30 +143,25 @@ export default function App(){
           if (!cancelled) setError(err?.message || String(err))
         }
       })
+      if (cancelled) {
+        if (engine && typeof engine.destroy === 'function') {
+          try { engine.destroy() } catch (e) { /* ignore */ }
+        }
+        return
+      }
       engineRef.current = engine
-      // Setup settings and menu handlers once engine is ready and DOM is mounted
-      let cleanupMenu = null
-      try {
-        const settingsMgr = setupSettings((k,v)=>{})
-        const geometryFactory = backend === 'webgpu'
-          ? createWebGPUGeometryFactory(engine.device, checkerboardTextureUrl)
-          : {
-              createCube: () => createDefaultCube(engine.gl),
-              createTexturedCube: () => createDefaultTexturedCube(engine.gl, checkerboardTextureUrl),
-              createSphere: () => createSphere(engine.gl),
-              createTexturedSphere: () => createTexturedSphere(engine.gl, checkerboardTextureUrl),
-            }
-        cleanupMenu = setupMenuHandlers({ gl: engine.gl, scene: engine.scene, settings: settingsMgr, updateScript: () => { applyScript() }, camera: engine.camera, geometryFactory })
-      } catch (e) {
-        // If menu handlers expect DOM elements, they should now be present; log any error.
-        console.warn('Menu handlers setup failed:', e)
-      }
 
-      // store cleanup so we can remove listeners if the engine reboots
-      if (cleanupMenu) {
-        // attach to engineRef so cleanup runs on unmount/reset
-        engineRef.current && (engineRef.current._cleanupMenu = cleanupMenu)
-      }
+      setupSettings((k,v)=>{})
+      geometryFactoryRef.current = backend === 'webgpu'
+        ? createWebGPUGeometryFactory(engine.device, checkerboardTextureUrl)
+        : {
+            createCube: () => createDefaultCube(engine.gl),
+            createTexturedCube: () => createDefaultTexturedCube(engine.gl, checkerboardTextureUrl),
+            createSphere: () => createSphere(engine.gl),
+            createTexturedSphere: () => createTexturedSphere(engine.gl, checkerboardTextureUrl),
+          }
+
+      setEngineReady((n) => n + 1)
     }
 
     boot()
@@ -165,13 +172,137 @@ export default function App(){
         if (typeof engineRef.current.destroy === 'function') {
           try { engineRef.current.destroy() } catch (e) { /* ignore */ }
         }
-        if (typeof engineRef.current._cleanupMenu === 'function') {
-          try { engineRef.current._cleanupMenu() } catch (e) { /* ignore */ }
-        }
         engineRef.current = null
       }
+      geometryFactoryRef.current = null
     }
   }, [backend])
+
+  // Reset menu state when the backend changes (new engine, fresh UI)
+  useEffect(() => {
+    setHasModelLoaded(false)
+    setCurrentShape('cube')
+    setTextured(false)
+  }, [backend])
+
+  // Drive the current shape from React state. Reacts to shape/textured/engine changes.
+  useEffect(() => {
+    if (!engineReady || hasModelLoaded || !currentShape) return
+    const engine = engineRef.current
+    const geometryFactory = geometryFactoryRef.current
+    if (!engine || !geometryFactory) return
+    let cancelled = false
+    loadShape({ engine, geometryFactory, shape: currentShape, textured })
+      .then(() => { if (!cancelled) setError(null) })
+      .catch((e) => { if (!cancelled) setError(e?.message || String(e)) })
+    return () => { cancelled = true }
+  }, [engineReady, currentShape, textured, hasModelLoaded])
+
+  // --- File menu handlers ---
+  async function handleImportZip(e) {
+    e.preventDefault()
+    const engine = engineRef.current
+    if (!engine) return
+    if (pickerActiveRef.current || window.__DRISHYAM_PICKER_ACTIVE) return
+    pickerActiveRef.current = true
+    window.__DRISHYAM_PICKER_ACTIVE = true
+    engine.scene.loadGeometry(null)
+    try {
+      let file
+      if (window.showOpenFilePicker) {
+        const [handle] = await window.showOpenFilePicker({
+          multiple: false,
+          types: [{
+            description: 'Zip Archives',
+            accept: {
+              'application/zip': ['.zip'],
+              'application/x-zip-compressed': ['.zip'],
+              'application/octet-stream': ['.zip'],
+            },
+          }],
+        })
+        if (!handle) return
+        file = await handle.getFile()
+      } else {
+        const input = document.querySelector('#model-file-input')
+        input.accept = '.zip'
+        input.multiple = false
+        file = await new Promise((resolve) => {
+          input.onchange = () => resolve(input.files?.[0])
+          input.click()
+        })
+        if (!file) return
+      }
+      await importZipFile({ engine, file })
+      setHasModelLoaded(true)
+      setError(null)
+    } catch (err) {
+      if (err?.name !== 'AbortError') setError(err?.message || String(err))
+    } finally {
+      pickerActiveRef.current = false
+      window.__DRISHYAM_PICKER_ACTIVE = false
+    }
+  }
+
+  async function handleImportFolder(e) {
+    e.preventDefault()
+    const engine = engineRef.current
+    if (!engine) return
+    if (pickerActiveRef.current || window.__DRISHYAM_PICKER_ACTIVE) return
+    if (!window.showDirectoryPicker) {
+      setError("Directory picker not supported. Use 'Import Zip' instead.")
+      return
+    }
+    pickerActiveRef.current = true
+    window.__DRISHYAM_PICKER_ACTIVE = true
+    engine.scene.loadGeometry(null)
+    try {
+      const dirHandle = await window.showDirectoryPicker()
+      await importFolderHandle({ engine, dirHandle })
+      setHasModelLoaded(true)
+      setError(null)
+    } catch (err) {
+      if (err?.name !== 'AbortError') setError(err?.message || String(err))
+    } finally {
+      pickerActiveRef.current = false
+      window.__DRISHYAM_PICKER_ACTIVE = false
+    }
+  }
+
+  async function handleLoadSample(e) {
+    e.preventDefault()
+    const engine = engineRef.current
+    if (!engine) return
+    try {
+      await loadSampleGltf({ engine })
+      setHasModelLoaded(true)
+      setError(null)
+    } catch (err) {
+      setError(`Sample GLTF Error: ${err?.message || String(err)}`)
+    }
+  }
+
+  async function handleResetScene(e) {
+    e.preventDefault()
+    const engine = engineRef.current
+    const geometryFactory = geometryFactoryRef.current
+    if (!engine || !geometryFactory) return
+    try {
+      await resetSceneOp({ engine, geometryFactory })
+      setHasModelLoaded(false)
+      setCurrentShape('cube')
+      setTextured(false)
+      setError(null)
+    } catch (err) {
+      setError(err?.message || String(err))
+    }
+  }
+
+  function selectShape(e, shape) {
+    e.preventDefault()
+    if (hasModelLoaded) return
+    setCurrentShape(shape)
+  }
 
   // Handlers to apply edits
   function applyShaders() {
@@ -473,27 +604,27 @@ export default function App(){
               <div className="menu-submenu">
                 <div className="menu-item">Import Model</div>
                 <div className="dropdown-content sub-dropdown">
-                  <a href="#" id="import-zip-btn" title="Load zip containing gltf model">Import .zip</a>
-                  <a href="#" id="import-folder-btn" title="Load directory containing gltf model">Import Directory</a>
+                  <a href="#" onClick={handleImportZip} title="Load zip containing gltf model">Import .zip</a>
+                  <a href="#" onClick={handleImportFolder} title="Load directory containing gltf model">Import Directory</a>
                 </div>
               </div>
               <div className="menu-separator"></div>
-              <a href="#" id="load-sample-gltf-btn">Load Sample Model</a>
+              <a href="#" onClick={handleLoadSample}>Load Sample Model</a>
               <div className="menu-separator"></div>
-              <a href="#" id="reset-scene-btn">Reset Scene</a>
+              <a href="#" onClick={handleResetScene}>Reset Scene</a>
             </div>
           </div>
 
-          <div id="shapes-menu-container" className="menu-container">
+          <div id="shapes-menu-container" className={`menu-container ${hasModelLoaded ? 'disabled' : ''}`}>
             <div className="menu-item">Shapes</div>
             <div className="dropdown-content">
-              <a href="#" id="shape-textured-toggle" className="menu-checkbox">
-                <input type="checkbox" id="shape-textured-checkbox" />
-                <label htmlFor="shape-textured-checkbox">Textured</label>
+              <a href="#" className="menu-checkbox" onClick={(e) => { e.preventDefault(); if (!hasModelLoaded) setTextured(v => !v) }}>
+                <input type="checkbox" checked={textured} onChange={() => {}} disabled={hasModelLoaded} style={{pointerEvents:'none'}} />
+                <label style={textured ? {fontWeight:'bold'} : {}}>Textured</label>
               </a>
               <div className="menu-separator"></div>
-              <a href="#" id="shape-cube-btn">Cube</a>
-              <a href="#" id="shape-sphere-btn">Sphere</a>
+              <a href="#" style={currentShape === 'cube' && !hasModelLoaded ? {fontWeight:'bold'} : {}} onClick={(e) => selectShape(e, 'cube')}>Cube</a>
+              <a href="#" style={currentShape === 'sphere' && !hasModelLoaded ? {fontWeight:'bold'} : {}} onClick={(e) => selectShape(e, 'sphere')}>Sphere</a>
               <div className="menu-separator"></div>
               <a href="#" className="disabled">Cone (soon)</a>
               <a href="#" className="disabled">Cylinder (soon)</a>

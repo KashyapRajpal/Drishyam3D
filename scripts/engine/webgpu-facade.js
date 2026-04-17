@@ -26,7 +26,7 @@ export function buildDrawableFromData(device, data, texture = null, name = 'draw
 
 /**
  * Returns a backend-agnostic shape factory for WebGPU.
- * Mirrors the shape creation surface used by menu-handlers.
+ * Mirrors the shape creation surface used by the UI layer.
  */
 export function createWebGPUGeometryFactory(device, textureUrl) {
     async function loadTexture() {
