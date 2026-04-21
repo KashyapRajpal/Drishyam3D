@@ -8,7 +8,6 @@ import { createIdentityMatrix, createPerspectiveMatrix, createLookAtMatrix, mult
 import {
     MATRIX_UNIFORM_SIZE,
     MATERIAL_UNIFORM_SIZE,
-    createRenderPipeline,
     createUniformBuffer,
     createDefaultTexture,
     createSampler,
@@ -16,10 +15,8 @@ import {
     createBindGroup,
 } from './webgpu-helpers.js';
 
-let _drawable = null;
-
 export function createWebGPUScene(device, context, format, canvas, camera) {
-    _drawable = null; // Clear stale buffers from any previous context
+    let drawable = null;
     let pipeline = null;
     let matrixBuffer = null;
     let materialBuffer = null;
@@ -39,11 +36,26 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
     const matrixData = new Float32Array(32);     // 2x mat4 = 32 floats
     const materialData = new Float32Array(8);    // vec4 + u32 + pad = 8 floats
 
-    function getDrawable() { return _drawable; }
+    function destroyDrawableResources(target) {
+        if (!target || !target.buffers) return;
+        const { buffers, texture } = target;
+        if (buffers.position?.destroy) buffers.position.destroy();
+        if (buffers.normal?.destroy) buffers.normal.destroy();
+        if (buffers.texCoord?.destroy) buffers.texCoord.destroy();
+        if (buffers.indices?.destroy) buffers.indices.destroy();
+        // Never destroy the shared default texture here.
+        if (texture && texture !== defaultTexture && texture.destroy) {
+            texture.destroy();
+        }
+    }
+
+    function getDrawable() { return drawable; }
 
     function setDrawable(next) {
-        if (next === _drawable) return;
-        _drawable = next;
+        if (next === drawable) return;
+        const previous = drawable;
+        drawable = next;
+        if (previous) destroyDrawableResources(previous);
         requestAnimationFrame(render);
         forceUpdate({ reinitScript: true });
     }
@@ -222,7 +234,14 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
 
         destroy() {
             active = false;
-            _drawable = null;
+            if (depthTexture && depthTexture.destroy) depthTexture.destroy();
+            if (matrixBuffer && matrixBuffer.destroy) matrixBuffer.destroy();
+            if (materialBuffer && materialBuffer.destroy) materialBuffer.destroy();
+            if (defaultTexture && defaultTexture.destroy) defaultTexture.destroy();
+            destroyDrawableResources(drawable);
+            drawable = null;
+            bindGroup = null;
+            pipeline = null;
         },
     };
 }

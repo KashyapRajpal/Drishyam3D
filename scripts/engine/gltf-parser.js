@@ -4,6 +4,8 @@
  * @license MIT
  */
 
+import { createVertexBuffer, createIndexBuffer, createTextureFromImageBitmap } from './webgpu-helpers.js';
+
 // This is a simplified GLTF loader designed to handle basic GLTF 2.0 files,
 // particularly those with a single external .bin file and external textures,
 // like the Khronos BoxTextured sample. It does not implement the full GLTF spec.
@@ -116,6 +118,82 @@ if (!WebGLRenderingContext.sizeOf) {
  * @returns {Promise<{buffers: object, vertexCount: number}>} A drawable object for the scene.
  */
 export async function parseGltf(gl, source) {
+    const asset = await parseGltfAsset(source);
+
+    let indices = asset.indices;
+    let indexType = getWebGLComponentType(asset.indicesComponentType);
+    if (asset.indicesComponentType === 5125) {
+        const ext = gl.getExtension('OES_element_index_uint');
+        if (!ext) {
+            let maxIndex = 0;
+            for (let i = 0; i < indices.length; i += 1) {
+                if (indices[i] > maxIndex) maxIndex = indices[i];
+            }
+            if (maxIndex <= 65535) {
+                indices = new Uint16Array(indices);
+                indexType = WebGLRenderingContext.UNSIGNED_SHORT;
+            } else {
+                throw new Error('Model uses 32-bit indices not supported by this device.');
+            }
+        }
+    }
+
+    const positionBuffer = createAndBindBuffer(gl, gl.ARRAY_BUFFER, asset.positions);
+    const normalBuffer = createAndBindBuffer(gl, gl.ARRAY_BUFFER, asset.normals);
+    const indexBuffer = createAndBindBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, indices);
+
+    const buffers = {
+        position: positionBuffer,
+        normal: normalBuffer,
+        indices: indexBuffer,
+    };
+
+    if (asset.texCoords) {
+        buffers.texCoord = createAndBindBuffer(gl, gl.ARRAY_BUFFER, asset.texCoords);
+    }
+
+    const texture = asset.textureBitmap ? createAndBindTexture(gl, asset.textureBitmap) : null;
+
+    const drawable = {
+        buffers,
+        texture,
+        vertexCount: indices.length,
+        indexType,
+        bounds: asset.bounds,
+        _debug: {
+            name: asset.sourceName,
+            positionElementCount: asset.positions.length,
+            normalElementCount: asset.normals.length,
+            indexElementCount: indices.length,
+        },
+    };
+
+    console.log('GLTF model parsed successfully:', drawable, drawable._debug);
+    return drawable;
+}
+
+/**
+ * Parses and uploads GLTF for the active rendering backend.
+ * @param {{gl?: WebGLRenderingContext, device?: GPUDevice}} engine
+ * @param {ArrayBuffer | string | FileList | Map<string, File>} source
+ * @returns {Promise<object>}
+ */
+export async function parseGltfForBackend(engine, source) {
+    if (engine?.gl) {
+        return parseGltf(engine.gl, source);
+    }
+    if (engine?.device) {
+        return parseGltfWebGPU(engine.device, source);
+    }
+    throw new Error('Unsupported engine context. Expected WebGL or WebGPU engine.');
+}
+
+/**
+ * Parses GLTF into backend-agnostic typed arrays and optional texture bitmap.
+ * @param {ArrayBuffer | string | FileList | Map<string, File>} source
+ * @returns {Promise<object>}
+ */
+export async function parseGltfAsset(source) {
     let gltfJson;
     let baseUrl = '';
     const localFileMap = new Map();
@@ -172,7 +250,7 @@ export async function parseGltf(gl, source) {
     const mesh = gltfJson.meshes[0];
     const primitive = mesh.primitives[0];
 
-    // Get accessor data for positions, normals, and indices
+    // Get accessor data for positions, normals, texcoords, and indices
     const positionAccessor = gltfJson.accessors[primitive.attributes.POSITION];
     const normalAccessor = gltfJson.accessors[primitive.attributes.NORMAL];
     const texCoordAccessor = gltfJson.accessors[primitive.attributes.TEXCOORD_0];
@@ -207,44 +285,14 @@ export async function parseGltf(gl, source) {
 
     const positions = getBufferViewData(binaryBufferData, bufferViews[positionAccessor.bufferView], positionAccessor);
     const normals = getBufferViewData(binaryBufferData, bufferViews[normalAccessor.bufferView], normalAccessor);
-    let indices = getBufferViewData(binaryBufferData, bufferViews[indicesAccessor.bufferView], indicesAccessor);
-
-    // Handle 32-bit indices for WebGL1
-    let indexType = getWebGLComponentType(indicesAccessor.componentType);
-    if (indicesAccessor.componentType === 5125) { // UNSIGNED_INT
-        const ext = gl.getExtension('OES_element_index_uint');
-        if (!ext) {
-            let maxIndex = 0;
-            for (let i = 0; i < indices.length; i += 1) {
-                if (indices[i] > maxIndex) maxIndex = indices[i];
-            }
-            if (maxIndex <= 65535) {
-                indices = new Uint16Array(indices);
-                indexType = WebGLRenderingContext.UNSIGNED_SHORT;
-            } else {
-                throw new Error('Model uses 32-bit indices not supported by this device.');
-            }
-        }
-    }
-
-    const positionBuffer = createAndBindBuffer(gl, gl.ARRAY_BUFFER, positions);
-    const normalBuffer = createAndBindBuffer(gl, gl.ARRAY_BUFFER, normals);
-    const indexBuffer = createAndBindBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, indices);
-    
-    const buffers = {
-        position: positionBuffer,
-        normal: normalBuffer,
-        indices: indexBuffer,
-    };
-
-    // --- Texture Coordinates (if they exist) ---
+    const indices = getBufferViewData(binaryBufferData, bufferViews[indicesAccessor.bufferView], indicesAccessor);
+    let texCoords = null;
     if (texCoordAccessor) {
-        const texCoords = getBufferViewData(binaryBufferData, bufferViews[texCoordAccessor.bufferView], texCoordAccessor);
-        buffers.texCoord = createAndBindBuffer(gl, gl.ARRAY_BUFFER, texCoords);
+        texCoords = getBufferViewData(binaryBufferData, bufferViews[texCoordAccessor.bufferView], texCoordAccessor);
     }
 
     // --- Texture (if it exists) ---
-    let texture = null;
+    let textureBitmap = null;
     const material = gltfJson.materials[primitive.material];
     if (material && material.pbrMetallicRoughness && material.pbrMetallicRoughness.baseColorTexture) {
         const textureInfo = material.pbrMetallicRoughness.baseColorTexture;
@@ -252,25 +300,28 @@ export async function parseGltf(gl, source) {
         const imageSource = gltfJson.images[gltfTexture.source];
         
         if (imageSource.uri) {
+            let imageFile = null;
             let imageUrl;
             const imagePath = baseUrl + imageSource.uri;
             const localImageFile = localFileMap.get(imagePath);
             if (localImageFile) {
-                imageUrl = URL.createObjectURL(localImageFile);
+                imageFile = localImageFile;
             } else if (baseUrl) {
                 imageUrl = baseUrl + imageSource.uri;
             } else {
                 throw new Error(`Cannot resolve image URI: ${imageSource.uri}. baseUrl=${baseUrl || '(empty)'}; available files (sample): ${listAvailableFiles().join(', ')}`);
             }
 
-            const image = new Image();
-            image.crossOrigin = "anonymous"; // Request the image with CORS headers
-            await new Promise((resolve, reject) => {
-                image.onload = resolve;
-                image.onerror = () => reject(new Error(`Failed to load texture from ${image.src}`));
-                image.src = imageUrl;
-            });
-            texture = createAndBindTexture(gl, image);
+            if (imageFile) {
+                textureBitmap = await createImageBitmap(imageFile);
+            } else {
+                const imageResponse = await fetch(imageUrl);
+                if (!imageResponse.ok) {
+                    throw new Error(`Failed to load texture from ${imageUrl}: ${imageResponse.status} ${imageResponse.statusText}`);
+                }
+                const imageBlob = await imageResponse.blob();
+                textureBitmap = await createImageBitmap(imageBlob);
+            }
         } else {
             throw new Error("Embedded GLTF images are not yet supported by this simple loader.");
         }
@@ -296,24 +347,53 @@ export async function parseGltf(gl, source) {
     const dz = maxZ - minZ;
     const radius = Math.max(dx, dy, dz) / 2 || 1;
 
-    const drawable = {
-        buffers: buffers,
-        texture: texture,
-        vertexCount: indicesAccessor.count,
-        indexType: indexType, // Use resolved index type (handles 32-bit indices)
+    return {
+        sourceName,
+        positions,
+        normals,
+        texCoords,
+        indices,
+        indicesComponentType: indicesAccessor.componentType,
+        textureBitmap,
         bounds: { center, radius },
     };
+}
 
-    // Attach some diagnostic counts so the renderer can inspect buffer sizes.
-    // These are element counts (not byte lengths).
-    drawable._debug = {
-        name: sourceName,
-        positionElementCount: positions.length,
-        normalElementCount: normals.length,
-        indexElementCount: indices.length,
+async function parseGltfWebGPU(device, source) {
+    const asset = await parseGltfAsset(source);
+    let indices = asset.indices;
+    if (!(indices instanceof Uint16Array)) {
+        let maxIndex = 0;
+        for (let i = 0; i < indices.length; i += 1) {
+            if (indices[i] > maxIndex) maxIndex = indices[i];
+        }
+        if (maxIndex > 65535) {
+            throw new Error('Model uses 32-bit indices not yet supported by the current WebGPU index path.');
+        }
+        indices = new Uint16Array(indices);
+    }
+
+    const texCoords = asset.texCoords || new Float32Array((asset.positions.length / 3) * 2);
+
+    const drawable = {
+        buffers: {
+            position: createVertexBuffer(device, asset.positions),
+            normal: createVertexBuffer(device, asset.normals),
+            texCoord: createVertexBuffer(device, texCoords),
+            indices: createIndexBuffer(device, indices),
+        },
+        texture: asset.textureBitmap ? createTextureFromImageBitmap(device, asset.textureBitmap) : null,
+        vertexCount: indices.length,
+        bounds: asset.bounds,
+        _debug: {
+            name: asset.sourceName,
+            positionElementCount: asset.positions.length,
+            normalElementCount: asset.normals.length,
+            indexElementCount: indices.length,
+        },
     };
 
-    console.log("GLTF model parsed successfully:", drawable, drawable._debug);
+    console.log('GLTF model parsed for WebGPU:', drawable._debug);
     return drawable;
 }
 
