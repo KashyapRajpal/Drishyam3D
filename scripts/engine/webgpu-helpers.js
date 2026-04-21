@@ -178,9 +178,22 @@ export function createDepthTexture(device, width, height) {
  */
 export async function createTextureFromUrl(device, url) {
     const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`Failed to fetch texture from '${url}': ${response.status} ${response.statusText}`);
+    }
     const blob = await response.blob();
     const imageBitmap = await createImageBitmap(blob);
 
+    return createTextureFromImageBitmap(device, imageBitmap);
+}
+
+/**
+ * Uploads an ImageBitmap into a GPU texture.
+ * @param {GPUDevice} device
+ * @param {ImageBitmap} imageBitmap
+ * @returns {GPUTexture}
+ */
+export function createTextureFromImageBitmap(device, imageBitmap) {
     const texture = device.createTexture({
         size: [imageBitmap.width, imageBitmap.height, 1],
         format: 'rgba8unorm',

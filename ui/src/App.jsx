@@ -546,6 +546,7 @@ export default function App(){
     if (resolvedActiveTab === sceneScriptPath) setFileContents((prev) => ({ ...prev, [sceneScriptPath]: defaultScript }))
     else if (resolvedActiveTab === defaultVertPath) setFileContents((prev) => ({ ...prev, [defaultVertPath]: defaultVert }))
     else if (resolvedActiveTab === defaultFragPath) setFileContents((prev) => ({ ...prev, [defaultFragPath]: defaultFrag }))
+    else if (resolvedActiveTab === defaultWgslPath) setFileContents((prev) => ({ ...prev, [defaultWgslPath]: defaultWgsl }))
   }
 
   // Auto-refresh effect: apply changes after debounce when enabled
@@ -553,7 +554,7 @@ export default function App(){
     if (!autoRefresh || !resolvedActiveTab || !hasUnapplied(resolvedActiveTab)) return
     const timer = setTimeout(()=>{
       if (resolvedActiveTab === sceneScriptPath) applyScript()
-      else if (resolvedActiveTab === defaultVertPath || resolvedActiveTab === defaultFragPath) applyShaders()
+      else if (resolvedActiveTab === defaultVertPath || resolvedActiveTab === defaultFragPath || resolvedActiveTab === defaultWgslPath) applyShaders()
     }, 3000)
     return ()=>clearTimeout(timer)
   }, [fileContents, resolvedActiveTab, autoRefresh])

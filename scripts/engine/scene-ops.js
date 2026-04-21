@@ -4,7 +4,7 @@
  * @license MIT
  */
 
-import { parseGltf } from './gltf-parser.js';
+import { parseGltfForBackend } from './gltf-parser.js';
 
 export function frameCamera(camera, drawable) {
     if (!camera || !drawable || !drawable.bounds) return;
@@ -35,7 +35,7 @@ export async function resetScene({ engine, geometryFactory }) {
 
 export async function loadSampleGltf({ engine }) {
     const url = 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/main/2.0/BoxTextured/glTF/BoxTextured.gltf';
-    const drawable = await parseGltf(engine.gl, url);
+    const drawable = await parseGltfForBackend(engine, url);
     engine.scene.loadGeometry(drawable);
     frameCamera(engine.camera, drawable);
     return drawable;
@@ -80,7 +80,7 @@ export async function importZipFile({ engine, file }) {
     });
     await Promise.all(filePromises);
 
-    const drawable = await parseGltf(engine.gl, fileMap);
+    const drawable = await parseGltfForBackend(engine, fileMap);
     engine.scene.loadGeometry(drawable);
     frameCamera(engine.camera, drawable);
     return drawable;
@@ -112,7 +112,7 @@ export async function importFolderHandle({ engine, dirHandle, preferredGltfName 
         if (key !== selectedPath) orderedMap.set(key, val);
     });
 
-    const drawable = await parseGltf(engine.gl, orderedMap);
+    const drawable = await parseGltfForBackend(engine, orderedMap);
     engine.scene.loadGeometry(drawable);
     frameCamera(engine.camera, drawable);
     return drawable;
