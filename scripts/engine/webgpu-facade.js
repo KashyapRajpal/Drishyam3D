@@ -8,6 +8,8 @@ import { translateMatrix, rotateMatrix } from './matrix.js';
 import { Camera } from './camera.js';
 import { generateCubeData, generateSphereData, resolveTextureUrl } from './geometry.js';
 import { initWebGPU, createRenderPipeline, createVertexBuffer, createIndexBuffer, createTextureFromUrl } from './webgpu-helpers.js';
+import { parsePly } from './ply-loader.js';
+import { packSplats, createSplatStorageBuffer } from './splat-helpers.js';
 import { createWebGPUScene } from './webgpu-scene.js';
 
 export function buildDrawableFromData(device, data, texture = null, name = 'drawable') {
@@ -119,14 +121,46 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
         }
     }
 
+    /**
+     * Parses a 3DGS .ply ArrayBuffer and loads it as a splat drawable.
+     * @param {ArrayBuffer} arrayBuffer
+     * @returns {{ kind: 'splat', storageBuffer: GPUBuffer, count: number, bounds: object|null }}
+     */
+    function loadSplats(arrayBuffer) {
+        const parsed = parsePly(arrayBuffer);
+        const packed = packSplats(parsed);
+        const storageBuffer = createSplatStorageBuffer(device, packed);
+        const drawable = {
+            kind: 'splat',
+            storageBuffer,
+            count: parsed.count,
+            bounds: parsed.bounds,
+            _debug: { name: 'splat cloud' },
+        };
+        scene.loadGeometry(drawable);
+        return drawable;
+    }
+
+    function setSplatDebugMode(mode) {
+        scene.setSplatDebugMode(mode);
+    }
+
     if (!shaderSources?.wgsl) {
         errorHandler(new Error('Missing WGSL shader source.'));
         return null;
     }
 
     setShaders(shaderSources.wgsl);
+    if (shaderSources.splatWgsl && shaderSources.splatSortWgsl) {
+        scene.setSplatShaders(shaderSources.splatWgsl, shaderSources.splatSortWgsl);
+    }
     setScriptSource(scriptSource);
     scene.start();
 
-    return { device, scene, camera, setShaders, setScriptSource, destroy: () => scene.destroy() };
+    return {
+        device, scene, camera,
+        setShaders, setScriptSource,
+        loadSplats, setSplatDebugMode,
+        destroy: () => scene.destroy(),
+    };
 }

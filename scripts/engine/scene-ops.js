@@ -33,6 +33,16 @@ export async function resetScene({ engine, geometryFactory }) {
     engine.scene.loadGeometry(cube);
 }
 
+export async function loadSplatFile({ engine, file }) {
+    if (typeof engine.loadSplats !== 'function') {
+        throw new Error('Splat loading requires the WebGPU backend.');
+    }
+    const arrayBuffer = await file.arrayBuffer();
+    const drawable = engine.loadSplats(arrayBuffer);
+    frameCamera(engine.camera, drawable);
+    return drawable;
+}
+
 export async function loadSampleGltf({ engine }) {
     const url = 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/main/2.0/BoxTextured/glTF/BoxTextured.gltf';
     const drawable = await parseGltfForBackend(engine, url);
