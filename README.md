@@ -1,22 +1,24 @@
-# Drishyam3D - A Simple WebGL Scene Editor
+# Drishyam3D - A Modern WebGPU Scene Editor
 
 [![Status: Beta](https://img.shields.io/badge/status-beta-blue.svg)](https://github.com/kashyaprajpal/Drishyam3D)
 
 [**Try the Live Demo!**](https://kashyaprajpal.github.io/Drishyam3D/)
 
-Drishyam3D is a lightweight, browser-based 3D scene editor built with WebGL. The UI is a React app (layout unchanged from the earlier HTML version) and provides a simple interface for writing and testing fragment shaders and scene manipulation scripts in real-time.
+Drishyam3D is a lightweight, browser-based 3D scene editor built with **WebGPU** and **React**. It supports both traditional triangle-based rendering (meshes, glTF models) and cutting-edge **3D Gaussian Splatting** for neural rendering workflows. The editor provides a powerful interface for writing and testing shaders, scene scripts, and loading rendered scenes in real-time.
 
 ## Features
 
-*   **Live WebGL Viewport**: Renders a 3D scene directly in your browser.
+*   **Dual Rendering Backends**: Choose between **WebGL** or **WebGPU** in Settings for high-performance rendering with modern GPU capabilities.
+*   **Triangle-Based Rendering**: Render meshes, glTF models, and procedural shapes with full shader control.
+*   **3D Gaussian Splatting**: Load and render `.ply` scenes captured with neural rendering techniques. Includes GPU-accelerated bitonic depth sorting and optional debug visualization modes.
 *   **Flexible Model Import**: Import GLTF models from local files (including `.zip` archives or entire directories) or load a sample model directly from the web.
 *   **Custom GLTF Parser**: A built-in, simplified GLTF 2.0 parser handles common model structures.
 *   **Dual-Panel Code Editor**:
-    *   Edit **Fragment Shaders** (GLSL) to control the appearance of objects.
+    *   Edit **Shaders** (GLSL for WebGL, WGSL for WebGPU) to control the appearance of objects.
     *   Write **Scene Scripts** (JavaScript) to define object behavior and animations.
 *   **Real-time Reload**: Instantly apply your shader and script changes with the **Apply** button.
 *   **Error Console**: Displays compilation and runtime errors from your code to help with debugging.
-*   **Basic UI**: A clean, resizable layout with tabbed editors for a smooth workflow.
+*   **Clean, Resizable UI**: A modern React-based layout with tabbed editors and responsive panels.
 
 ## How to Run
 
@@ -80,44 +82,76 @@ The editor is divided into three main panels and a top menu bar.
     *   `Import .zip`: Loads a `.zip` containing a `.gltf` and its assets (`.bin`, textures).
     *   `Import Directory`: Opens a directory picker to load a GLTF model from a folder.
     *   `Load Sample Model`: Loads a textured cube GLTF model from the web for quick testing.
+    *   `Load Splat (.ply)`: (WebGPU only) Loads a 3D Gaussian Splatting `.ply` scene.
     *   `Reset Scene`: Resets the viewport to the default cube and reloads the original scene script.
 *   **Shapes Menu**:
     *   `Textured` (Checkbox): When checked, any shape loaded from this menu will use the default checkerboard texture. This setting updates the current shape in real-time.
     *   `Cube` / `Sphere`: Loads a primitive cube or sphere into the scene.
+*   **Settings Menu**:
+    *   `Renderer`: Choose between **WebGL** or **WebGPU** backends.
+    *   `Splat Debug` (when splat loaded): Cycle through debug modes — **Off** (full rendering), **Points** (splat centers), **Points (sorted)** (colored by depth order).
 
-### Basic Workflow
+### Basic Workflows
+
+#### Triangle-Based Rendering
 
 1.  **Load a Model**: Use **File > Load Sample Model**, **File > Import .zip**, or **Shapes > Sphere** to get an object in the scene.
 2.  **Animate the Model**:
     *   In the Explorer, double-click `scene-script.js`.
     *   Modify the `update` function to change the model's rotation, position, or scale. For example, change `state.modelRotation += deltaTime * 0.5;` to `state.modelRotation += deltaTime * 2.0;` to make it spin faster.
 3.  **Change its Appearance**:
-    *   In the Explorer, double-click `default.frag` under the "Shaders" folder.
-    *   Modify the GLSL code. For example, to make untextured objects red, change the `else` block to `gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);`.
+    *   In the Explorer, double-click `default.vert` or `default.frag` (WebGL) / `default.wgsl` (WebGPU) under the "Shaders" folder.
+    *   Modify the shader code. For example, to make untextured objects red in GLSL, change the `else` block to `gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);`.
 4.  **See Your Changes**:
     *   Click the **Apply** button in the editor footer.
     *   Alternatively, check **Auto Refresh** and changes will apply automatically about 3 seconds after you stop typing.
 
+#### 3D Gaussian Splatting (WebGPU Only)
+
+1.  **Switch to WebGPU**: Open Settings → **Renderer** → **WebGPU** (requires Chrome/Edge 113+).
+2.  **Load a Splat Scene**: Use **File > Load Splat (.ply)** and select a `.ply` file from a 3DGS capture.
+3.  **Inspect Geometry** (Optional):
+    *   Open Settings → **Splat Debug** and cycle through:
+        *   **Points**: See raw splat centers (validates loading & projection).
+        *   **Points (sorted)**: See centers colored by depth order (validates GPU sort).
+        *   **Off**: Full Gaussian splatting rendering.
+4.  **Orbit the Scene**: Use the mouse to rotate the camera and see the splats render from all angles with correct back-to-front blending.
+
 ## Roadmap
 
-The goal of Drishyam3D is to evolve into a forward-looking platform for modern, high-performance web graphics. Development is organized into three focused phases: a foundational UI/UX overhaul, migration of the rendering core to WebGPU, and the addition of advanced rendering capabilities such as neural rendering and hardware-accelerated ray tracing.
+The goal of Drishyam3D is to evolve into a forward-looking platform for modern, high-performance web graphics. Development is organized into focused phases: a foundational UI/UX overhaul, migration of the rendering core to WebGPU, and the addition of advanced rendering capabilities such as neural rendering and hardware-accelerated ray tracing.
 
 ### Phase 1: Foundational UI/UX Overhaul (Completed)
 
 The UI has been migrated from the original vanilla JavaScript front-end to a React-based app while keeping the overall layout and workflow the same.
 
-### Phase 2: Next-Generation Rendering Engine
+### Phase 2: Next-Generation Rendering Engine (Completed)
 
-The core rendering engine will be migrated from WebGL to **WebGPU**. This is a foundational step to unlock significant performance improvements and modern GPU capabilities. Key benefits include:
-*   **High-Performance Rendering**: Lower CPU overhead for more complex scenes.
-*   **Compute Shaders**: Native support for general-purpose GPU (GPGPU) workloads, enabling high-performance simulations and parallel data processing directly on the GPU.
+The core rendering engine has been migrated from WebGL to **WebGPU** and now runs on both backends, selectable in Settings. This is a foundational step that unlocks significant performance improvements and modern GPU capabilities. Key achievements include:
+*   **Dual Backend Support**: WebGL 1.0 (legacy) and WebGPU (modern) backends coexist. The public engine API is backend-agnostic.
+*   **High-Performance Rendering**: Lower CPU overhead for complex scenes via WebGPU.
+*   **Compute Shader Support**: Native WebGPU compute shaders enable high-performance GPGPU workloads, parallel data processing, and advanced algorithms like the bitonic sort for splat depth ordering.
+*   **Backend-Agnostic Asset Loading**: glTF models load identically on both backends.
 
-### Phase 3: Advanced Rendering Capabilities
+### Phase 3a: Neural Rendering (Completed)
 
-Building on the new WebGPU engine, we will implement support for cutting-edge rendering techniques. The goals for this phase include:
+**3D Gaussian Splatting** renderer is now live and production-ready:
+*   **Load 3DGS Scenes**: Import `.ply` files captured with standard 3D Gaussian Splatting methods.
+*   **GPU-Accelerated Depth Sort**: Bitonic sort implemented as a WebGPU compute pass, sorting splats back-to-front every frame without CPU bottleneck.
+*   **Premultiplied Alpha Blending**: Correct view-dependent transparency rendering for Gaussian splats.
+*   **Debug Visualization**: Optional debug modes (Points, Points-Sorted) for validating splat geometry and sort correctness.
+*   **Seamless Integration**: Splats render alongside traditional geometry in the same scene using a polymorphic Renderer hierarchy.
 
-*   **Neural Rendering (Gaussian Splatting)**: Implement a renderer for 3D Gaussian Splatting, enabling the loading and real-time display of scenes captured with neural rendering methods.
-*   **Hardware-Accelerated Ray Tracing**: Integrate support for real-time ray tracing for photorealistic lighting, shadows, and reflections. (Note: This relies on an experimental WebGPU extension and is a forward-looking goal).
+### Phase 3b: Advanced Rendering (In Progress)
+
+Planned enhancements to the Gaussian Splatting pipeline:
+*   **Full Spherical Harmonics**: View-dependent color (degrees 1–3) for realistic relighting.
+*   **GPU Radix Sort**: Faster sorting for very large splat counts (>10M).
+*   **Compressed Formats**: `.splat` and other neural-rendering-native formats.
+
+### Phase 3c: Ray Tracing (Forward-Looking)
+
+Hardware-accelerated ray tracing for photorealistic lighting, shadows, and reflections — pending stable WebGPU ray-query support in browsers.
 
 
 
