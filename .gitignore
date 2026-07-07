@@ -19,3 +19,6 @@ Thumbs.db
 
 # Local Claude Code config (contains machine-specific absolute paths)
 .claude/
+
+# Local 3D Gaussian Splatting test data (large .ply / archives)
+assets/3dgs/

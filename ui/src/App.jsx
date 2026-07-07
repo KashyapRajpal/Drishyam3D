@@ -11,6 +11,8 @@ import checkerboardTextureUrl from '@assets/checkerboard-texture.png'
 import defaultVert from '@assets/shaders/default.vert?raw'
 import defaultFrag from '@assets/shaders/default.frag?raw'
 import defaultWgsl from '@assets/shaders/default.wgsl?raw'
+import splatWgsl from '@assets/shaders/splat.wgsl?raw'
+import splatSortWgsl from '@assets/shaders/splat-sort.wgsl?raw'
 import defaultScript from '@scripts/scene-script.js?raw'
 import logoPng from '@assets/logo/drishyam3d_logo.png'
 import { setupSettings } from '@engine/settings.js'
@@ -18,6 +20,7 @@ import {
   loadShape,
   resetScene as resetSceneOp,
   loadSampleGltf,
+  loadSplatFile,
   importZipFile,
   importFolderHandle,
 } from '@engine/scene-ops.js'
@@ -117,6 +120,8 @@ export default function App(){
   const [textured, setTextured] = useState(false)
   const [currentShape, setCurrentShape] = useState('cube')
   const [hasModelLoaded, setHasModelLoaded] = useState(false)
+  const [splatLoaded, setSplatLoaded] = useState(false)
+  const [splatDebug, setSplatDebug] = useState('off') // 'off' | 'points'
   const [engineReady, setEngineReady] = useState(0)
   const canvasRef = useRef(null)
   const engineRef = useRef(null)
@@ -131,7 +136,11 @@ export default function App(){
       if (!canvas) return
 
       const shaderSources = backend === 'webgpu'
-        ? { wgsl: fileContents[defaultWgslPath] ?? defaultWgsl }
+        ? {
+            wgsl: fileContents[defaultWgslPath] ?? defaultWgsl,
+            splatWgsl,
+            splatSortWgsl,
+          }
         : { vertex: fileContents[defaultVertPath], fragment: fileContents[defaultFragPath] }
 
       const engine = await initEngine({
@@ -183,7 +192,18 @@ export default function App(){
     setHasModelLoaded(false)
     setCurrentShape('cube')
     setTextured(false)
+    setSplatLoaded(false)
+    setSplatDebug('off')
   }, [backend])
+
+  // Apply the splat debug mode to the active engine.
+  useEffect(() => {
+    if (!engineReady) return
+    const engine = engineRef.current
+    if (engine && typeof engine.setSplatDebugMode === 'function') {
+      engine.setSplatDebugMode(splatDebug)
+    }
+  }, [engineReady, splatDebug, splatLoaded])
 
   // Drive the current shape from React state. Reacts to shape/textured/engine changes.
   useEffect(() => {
@@ -282,6 +302,48 @@ export default function App(){
     }
   }
 
+  async function handleLoadSplat(e) {
+    e.preventDefault()
+    const engine = engineRef.current
+    if (!engine) return
+    if (typeof engine.loadSplats !== 'function') {
+      setError('Splat loading requires the WebGPU backend.')
+      return
+    }
+    if (pickerActiveRef.current || window.__DRISHYAM_PICKER_ACTIVE) return
+    pickerActiveRef.current = true
+    window.__DRISHYAM_PICKER_ACTIVE = true
+    try {
+      let file
+      if (window.showOpenFilePicker) {
+        const [handle] = await window.showOpenFilePicker({
+          multiple: false,
+          types: [{ description: '3D Gaussian Splat', accept: { 'application/octet-stream': ['.ply'] } }],
+        })
+        if (!handle) return
+        file = await handle.getFile()
+      } else {
+        const input = document.querySelector('#model-file-input')
+        input.accept = '.ply'
+        input.multiple = false
+        file = await new Promise((resolve) => {
+          input.onchange = () => resolve(input.files?.[0])
+          input.click()
+        })
+        if (!file) return
+      }
+      await loadSplatFile({ engine, file })
+      setHasModelLoaded(true)
+      setSplatLoaded(true)
+      setError(null)
+    } catch (err) {
+      if (err?.name !== 'AbortError') setError(`Splat Error: ${err?.message || String(err)}`)
+    } finally {
+      pickerActiveRef.current = false
+      window.__DRISHYAM_PICKER_ACTIVE = false
+    }
+  }
+
   async function handleResetScene(e) {
     e.preventDefault()
     const engine = engineRef.current
@@ -292,6 +354,8 @@ export default function App(){
       setHasModelLoaded(false)
       setCurrentShape('cube')
       setTextured(false)
+      setSplatLoaded(false)
+      setSplatDebug('off')
       setError(null)
     } catch (err) {
       setError(err?.message || String(err))
@@ -611,6 +675,9 @@ export default function App(){
               </div>
               <div className="menu-separator"></div>
               <a href="#" onClick={handleLoadSample}>Load Sample Model</a>
+              {backend === 'webgpu'
+                ? <a href="#" onClick={handleLoadSplat} title="Load a 3D Gaussian Splatting .ply file">Load Splat (.ply)</a>
+                : <a href="#" className="disabled" title="Switch to the WebGPU renderer to load splats">Load Splat (WebGPU only)</a>}
               <div className="menu-separator"></div>
               <a href="#" onClick={handleResetScene}>Reset Scene</a>
             </div>
@@ -639,6 +706,14 @@ export default function App(){
               <div className="menu-label" style={{padding:'4px 12px',opacity:0.6,fontSize:'0.8em',userSelect:'none'}}>Renderer</div>
               <a href="#" style={backend === 'webgl' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setBackend('webgl') }}>WebGL</a>
               <a href="#" style={backend === 'webgpu' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setBackend('webgpu') }}>WebGPU</a>
+              {splatLoaded && (
+                <>
+                  <div className="menu-separator"></div>
+                  <div className="menu-label" style={{padding:'4px 12px',opacity:0.6,fontSize:'0.8em',userSelect:'none'}}>Splat Debug</div>
+                  <a href="#" style={splatDebug === 'off' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setSplatDebug('off') }}>Off</a>
+                  <a href="#" style={splatDebug === 'points' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setSplatDebug('points') }}>Points</a>
+                </>
+              )}
             </div>
           </div>
         </nav>

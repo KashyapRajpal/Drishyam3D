@@ -1,52 +1,38 @@
 /**
- * @file Manages the WebGPU scene, rendering loop, and drawable objects.
+ * @file WebGPU scene core — owns shared per-frame state and the render loop,
+ *       and dispatches to a Renderer based on the active drawable's `kind`.
  * @copyright 2026 Kashyap Rajpal
  * @license MIT
+ *
+ * Shared entities (device/context/camera, view + projection matrices, the
+ * user-script tick, resize, and the RAF loop) live here once. Everything that
+ * differs per drawable kind lives in a Renderer (see ./renderers/). Adding a
+ * new drawable kind is a new Renderer subclass plus a registry entry — the
+ * core does not change.
  */
-
-import { createIdentityMatrix, createPerspectiveMatrix, createLookAtMatrix, multiplyMatrices } from './matrix.js';
-import {
-    MATRIX_UNIFORM_SIZE,
-    MATERIAL_UNIFORM_SIZE,
-    createUniformBuffer,
-    createDefaultTexture,
-    createSampler,
-    createDepthTexture,
-    createBindGroup,
-} from './webgpu-helpers.js';
+import { createIdentityMatrix, createPerspectiveMatrix } from './matrix.js';
+import { MeshRenderer } from './renderers/mesh-renderer.js';
+import { SplatRenderer } from './renderers/splat-renderer.js';
 
 export function createWebGPUScene(device, context, format, canvas, camera) {
     let drawable = null;
-    let pipeline = null;
-    let matrixBuffer = null;
-    let materialBuffer = null;
-    let sampler = null;
-    let defaultTexture = null;
-    let depthTexture = null;
-    let bindGroup = null;
-    let depthWidth = 0;
-    let depthHeight = 0;
+    let active = true; // Set to false by destroy() to stop this scene's render loop
+    let then = 0;
 
     let userScript = { init: () => {}, update: () => {} };
     const sceneState = { modelRotation: 0.0, modelViewMatrix: null };
-    let then = 0;
-    let active = true; // Set to false by destroy() to stop this scene's render loop
 
-    // Scratch ArrayBuffers reused every frame to avoid per-frame allocations
-    const matrixData = new Float32Array(32);     // 2x mat4 = 32 floats
-    const materialData = new Float32Array(8);    // vec4 + u32 + pad = 8 floats
+    // Renderer registry — one per drawable kind.
+    const meshRenderer = new MeshRenderer(device, format);
+    const splatRenderer = new SplatRenderer(device, format);
+    const renderers = new Map([
+        [meshRenderer.kind, meshRenderer],
+        [splatRenderer.kind, splatRenderer],
+    ]);
 
-    function destroyDrawableResources(target) {
-        if (!target || !target.buffers) return;
-        const { buffers, texture } = target;
-        if (buffers.position?.destroy) buffers.position.destroy();
-        if (buffers.normal?.destroy) buffers.normal.destroy();
-        if (buffers.texCoord?.destroy) buffers.texCoord.destroy();
-        if (buffers.indices?.destroy) buffers.indices.destroy();
-        // Never destroy the shared default texture here.
-        if (texture && texture !== defaultTexture && texture.destroy) {
-            texture.destroy();
-        }
+    function rendererFor(target) {
+        if (!target) return null;
+        return renderers.get(target.kind ?? 'mesh') ?? null;
     }
 
     function getDrawable() { return drawable; }
@@ -55,36 +41,17 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
         if (next === drawable) return;
         const previous = drawable;
         drawable = next;
-        if (previous) destroyDrawableResources(previous);
+        if (previous) rendererFor(previous)?.releaseDrawable(previous);
+        rendererFor(drawable)?.prepare(drawable);
         requestAnimationFrame(render);
         forceUpdate({ reinitScript: true });
     }
 
-    function rebuildBindGroup() {
-        if (!pipeline || !matrixBuffer || !materialBuffer || !sampler || !defaultTexture) return;
-        const drawable = getDrawable();
-        const texture = drawable?.texture ?? defaultTexture;
-        bindGroup = createBindGroup(device, pipeline, {
-            matrixBuffer,
-            materialBuffer,
-            sampler,
-            texture,
-        });
-    }
-
-    function ensureDepthTexture(width, height) {
-        if (depthTexture && depthWidth === width && depthHeight === height) return;
-        if (depthTexture) depthTexture.destroy();
-        depthTexture = createDepthTexture(device, width, height);
-        depthWidth = width;
-        depthHeight = height;
-    }
-
     function resizeCanvas() {
-        const displayWidth  = canvas.clientWidth;
+        const displayWidth = canvas.clientWidth;
         const displayHeight = canvas.clientHeight;
         if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
-            canvas.width  = displayWidth;
+            canvas.width = displayWidth;
             canvas.height = displayHeight;
             context.configure({
                 device,
@@ -117,113 +84,81 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
         const deltaTime = now - then;
         then = now;
 
-        const drawable = getDrawable();
-
-        if (!pipeline || !drawable) {
+        const current = getDrawable();
+        const renderer = rendererFor(current);
+        if (!renderer || !current) {
             requestAnimationFrame(render);
             return;
         }
 
         resizeCanvas();
-        const width  = canvas.width;
+        const width = canvas.width;
         const height = canvas.height;
         if (width === 0 || height === 0) {
             requestAnimationFrame(render);
             return;
         }
 
-        ensureDepthTexture(width, height);
-
-        // Build matrices
+        // --- Shared per-frame state (computed once for every renderer) ---
         const fieldOfView = 45 * Math.PI / 180;
         const aspect = width / height;
         const projectionMatrix = createPerspectiveMatrix(fieldOfView, aspect, 0.1, 100.0);
 
         camera.updateViewMatrix();
         const viewMatrix = camera.getViewMatrix();
-        const modelMatrix = createIdentityMatrix();
-        sceneState.modelViewMatrix = modelMatrix;
 
+        // The user script mutates sceneState.modelViewMatrix as the model matrix.
+        sceneState.modelViewMatrix = createIdentityMatrix();
         try { userScript.update(sceneState, deltaTime); } catch (e) { /* ignore */ }
 
-        const modelViewMatrix = multiplyMatrices(viewMatrix, modelMatrix);
-
-        // Upload matrices
-        matrixData.set(projectionMatrix, 0);
-        matrixData.set(modelViewMatrix, 16);
-        device.queue.writeBuffer(matrixBuffer, 0, matrixData);
-
-        // Upload material — hasTexture written as u32 at byte offset 16
-        const hasTexture = drawable.texture ? 1 : 0;
-        const baseColor = hasTexture ? [1, 1, 1, 1] : [0.5, 0.5, 1.0, 1.0];
-        materialData[0] = baseColor[0];
-        materialData[1] = baseColor[1];
-        materialData[2] = baseColor[2];
-        materialData[3] = baseColor[3];
-        new Uint32Array(materialData.buffer)[4] = hasTexture;
-        device.queue.writeBuffer(materialBuffer, 0, materialData);
-
-        // Rebuild bind group only when the drawable's texture changes
-        const expectedTexture = drawable.texture ?? defaultTexture;
-        if (!bindGroup || bindGroup._texture !== expectedTexture) {
-            bindGroup = createBindGroup(device, pipeline, {
-                matrixBuffer,
-                materialBuffer,
-                sampler,
-                texture: expectedTexture,
-            });
-            bindGroup._texture = expectedTexture;
-        }
-
-        // Record and submit
         const encoder = device.createCommandEncoder();
-        const pass = encoder.beginRenderPass({
-            colorAttachments: [{
-                view: context.getCurrentTexture().createView(),
-                clearValue: { r: 0, g: 0, b: 0, a: 1 },
-                loadOp: 'clear',
-                storeOp: 'store',
-            }],
-            depthStencilAttachment: {
-                view: depthTexture.createView(),
-                depthClearValue: 1.0,
-                depthLoadOp: 'clear',
-                depthStoreOp: 'store',
-            },
-        });
+        const targetView = context.getCurrentTexture().createView();
+        const frame = {
+            device,
+            encoder,
+            targetView,
+            camera,
+            viewMatrix,
+            projectionMatrix,
+            width,
+            height,
+            deltaTime,
+            sceneState,
+        };
 
-        pass.setPipeline(pipeline);
-        pass.setBindGroup(0, bindGroup);
-        pass.setVertexBuffer(0, drawable.buffers.position);
-        pass.setVertexBuffer(1, drawable.buffers.normal);
-        pass.setVertexBuffer(2, drawable.buffers.texCoord);
-        pass.setIndexBuffer(drawable.buffers.indices, 'uint16');
-        pass.drawIndexed(drawable.vertexCount);
-        pass.end();
+        renderer.record(frame, current);
 
         device.queue.submit([encoder.finish()]);
-
         requestAnimationFrame(render);
     }
 
     return {
         start() {
-            matrixBuffer    = createUniformBuffer(device, MATRIX_UNIFORM_SIZE);
-            materialBuffer  = createUniformBuffer(device, MATERIAL_UNIFORM_SIZE);
-            sampler         = createSampler(device);
-            defaultTexture  = createDefaultTexture(device);
+            for (const r of renderers.values()) r.init();
             forceUpdate({ reinitScript: true });
         },
 
         updatePipeline(newPipeline) {
-            pipeline = newPipeline;
-            rebuildBindGroup();
+            meshRenderer.setPipeline(newPipeline);
+            rendererFor(drawable)?.prepare(drawable);
             forceUpdate();
         },
 
         updateUserScript(newScript) {
             userScript = newScript;
             forceUpdate({ reinitScript: false });
+        },
+
+        setSplatShaders(splatWgsl, sortWgsl) {
+            if (!splatWgsl || !sortWgsl) return;
+            splatRenderer.setShaders(splatWgsl, sortWgsl);
+            if (drawable?.kind === 'splat') splatRenderer.prepare(drawable);
+            forceUpdate();
+        },
+
+        setSplatDebugMode(mode) {
+            splatRenderer.setDebugMode(mode);
+            forceUpdate();
         },
 
         loadGeometry(newDrawable) {
@@ -234,14 +169,9 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
 
         destroy() {
             active = false;
-            if (depthTexture && depthTexture.destroy) depthTexture.destroy();
-            if (matrixBuffer && matrixBuffer.destroy) matrixBuffer.destroy();
-            if (materialBuffer && materialBuffer.destroy) materialBuffer.destroy();
-            if (defaultTexture && defaultTexture.destroy) defaultTexture.destroy();
-            destroyDrawableResources(drawable);
+            if (drawable) rendererFor(drawable)?.releaseDrawable(drawable);
+            for (const r of renderers.values()) r.destroy();
             drawable = null;
-            bindGroup = null;
-            pipeline = null;
         },
     };
 }
