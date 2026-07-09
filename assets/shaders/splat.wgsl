@@ -79,19 +79,22 @@ fn vs_main(@builtin(vertex_index) vid : u32, @builtin(instance_index) iid : u32)
     let T = W * J;
     var cov2d = transpose(T) * Vrk * T;
 
-    // Low-pass filter so sub-pixel splats stay visible (antialiasing).
-    let a = cov2d[0][0] + 0.3;
-    let d = cov2d[1][1] + 0.3;
+    // Low-pass filter (0.1 antialiasing) to keep sub-pixel splats visible without excessive blur.
+    let a = cov2d[0][0] + 0.1;
+    let d = cov2d[1][1] + 0.1;
     let b = cov2d[0][1];
 
     let det = a * d - b * b;
     let mid = 0.5 * (a + d);
-    let lambda1 = mid + sqrt(max(0.1, mid * mid - det));
-    let lambda2 = mid - sqrt(max(0.1, mid * mid - det));
+    let discriminant = mid * mid - det;
+    let lambda1 = mid + sqrt(max(0.01, discriminant));
+    let lambda2 = mid - sqrt(max(0.01, discriminant));
 
-    let diagonal = normalize(vec2<f32>(b, lambda1 - a));
-    let majorAxis = min(sqrt(2.0 * lambda1), 1024.0) * diagonal;
-    let minorAxis = min(sqrt(2.0 * lambda2), 1024.0) * vec2<f32>(diagonal.y, -diagonal.x);
+    // Avoid division by zero in normalization; compute robust principal axes.
+    let axis_delta = lambda1 - a;
+    let diagonal = normalize(vec2<f32>(b, axis_delta + 1e-8));
+    let majorAxis = min(sqrt(max(0.0, 2.0 * lambda1)), 512.0) * diagonal;
+    let minorAxis = min(sqrt(max(0.0, 2.0 * lambda2)), 512.0) * vec2<f32>(diagonal.y, -diagonal.x);
 
     let corner = QUAD[vid];
     let centerNDC = pos2d.xy / pos2d.w;
