@@ -53,12 +53,13 @@ describe('parsePly', () => {
     rot_0: 0, rot_1: 0, rot_2: 0, rot_3: 2, // normalize -> (0,0,0,1)
   };
 
-  test('parses count, positions, and bounds', () => {
+  test('parses count, positions, and bounds (with Y-flip)', () => {
     const result = parsePly(buildPly([v0, v1]));
     expect(result.count).toBe(2);
-    expect(Array.from(result.positions)).toEqual([1, 2, 3, -1, -2, -3]);
+    // Y-coordinates are flipped: y -> -y
+    expect(Array.from(result.positions)).toEqual([1, -2, 3, -1, 2, -3]);
 
-    // center = midpoint = origin; radius = distance from origin to either point.
+    // center = midpoint = origin (after Y-flip); radius = distance from origin to either point.
     expect(result.bounds.center).toEqual([0, 0, 0]);
     expect(result.bounds.radius).toBeCloseTo(Math.hypot(1, 2, 3), 5);
   });

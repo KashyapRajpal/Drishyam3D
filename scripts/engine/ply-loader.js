@@ -136,10 +136,11 @@ export function parsePly(arrayBuffer) {
         const x = has('x') ? read(base, 'x') : 0;
         const y = has('y') ? read(base, 'y') : 0;
         const z = has('z') ? read(base, 'z') : 0;
+        // Flip Y axis: standard 3DGS scenes are Y-up, but we need to handle inverted captures.
         positions[i * 3 + 0] = x;
-        positions[i * 3 + 1] = y;
+        positions[i * 3 + 1] = -y;
         positions[i * 3 + 2] = z;
-        cx += x; cy += y; cz += z;
+        cx += x; cy += -y; cz += z;
 
         // Color from SH degree-0 DC term (default mid-grey if absent).
         colors[i * 3 + 0] = has('f_dc_0') ? 0.5 + SH_C0 * read(base, 'f_dc_0') : 0.5;
@@ -152,16 +153,27 @@ export function parsePly(arrayBuffer) {
         scales[i * 3 + 1] = has('scale_1') ? Math.exp(read(base, 'scale_1')) : 1;
         scales[i * 3 + 2] = has('scale_2') ? Math.exp(read(base, 'scale_2')) : 1;
 
-        // Rotation quaternion stored as (rot_0..3); normalize. Default identity.
+        // Rotation quaternion stored as (rot_0..3); normalize and canonicalize (qw > 0).
         let qw = has('rot_0') ? read(base, 'rot_0') : 1;
         let qx = has('rot_1') ? read(base, 'rot_1') : 0;
         let qy = has('rot_2') ? read(base, 'rot_2') : 0;
         let qz = has('rot_3') ? read(base, 'rot_3') : 0;
         const len = Math.hypot(qw, qx, qy, qz) || 1;
-        rotations[i * 4 + 0] = qw / len;
-        rotations[i * 4 + 1] = qx / len;
-        rotations[i * 4 + 2] = qy / len;
-        rotations[i * 4 + 3] = qz / len;
+        qw /= len;
+        qx /= len;
+        qy /= len;
+        qz /= len;
+        // Ensure qw >= 0 (canonical form; q and -q are equivalent, but we pick the shorter arc).
+        if (qw < 0) {
+            qw = -qw;
+            qx = -qx;
+            qy = -qy;
+            qz = -qz;
+        }
+        rotations[i * 4 + 0] = qw;
+        rotations[i * 4 + 1] = qx;
+        rotations[i * 4 + 2] = qy;
+        rotations[i * 4 + 3] = qz;
     }
 
     let bounds = null;
