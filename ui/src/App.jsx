@@ -14,7 +14,7 @@ import defaultWgsl from '@assets/shaders/default.wgsl?raw'
 import splatWgsl from '@assets/shaders/splat.wgsl?raw'
 import splatSortWgsl from '@assets/shaders/splat-sort.wgsl?raw'
 import defaultScript from '@scripts/scene-script.js?raw'
-import logoPng from '@assets/logo/drishyam3d_logo.png'
+import logoJpg from '@assets/logo/drishyam3d_logo.jpg'
 import { setupSettings } from '@engine/settings.js'
 import {
   loadShape,
@@ -650,7 +650,7 @@ export default function App(){
       return (
         <div key={folderKey} className="explorer-folder">
           {!isRoot && (
-            <div className="explorer-row" onClick={() => toggleExpand(folderKey)}>
+            <div className="explorer-row" onClick={() => toggleExpand(folderKey)} role="treeitem" tabIndex="0" aria-expanded={isOpen} aria-label={`${node.name} folder`}>
               <span className="caret">{isOpen ? '▾' : '▸'}</span>
               <span className="folder-name">{node.name}</span>
             </div>
@@ -667,7 +667,7 @@ export default function App(){
     const filePath = node.path
     const fileName = node.name
     return (
-      <div key={filePath} className={`explorer-row file ${openTabs.includes(filePath) ? 'opened' : ''}`} onClick={() => openFile(filePath)}>
+      <div key={filePath} className={`explorer-row file ${openTabs.includes(filePath) ? 'opened' : ''}`} onClick={() => openFile(filePath)} role="button" tabIndex="0" aria-label={`Open ${fileName}`}>
         <span className="file-name">{fileName}</span>
       </div>
     )
@@ -677,12 +677,12 @@ export default function App(){
     <div className="app-root full-ui">
       <div className="topbar">
         <div className="brand">
-          <img src={logoPng} alt="logo" className="logo-img" />
+          <img src={logoJpg} alt="Drishyam3D logo" className="logo-img" />
           <div className="title">Drishyam3D</div>
         </div>
         <nav className="menu">
           <div id="file-menu-container" className="menu-container">
-            <div className="menu-item">File</div>
+            <div className="menu-item" role="button" tabIndex="0" aria-label="File menu">File</div>
             <div className="dropdown-content">
               <div className="menu-submenu">
                 <div className="menu-item">Import Model</div>
@@ -702,7 +702,7 @@ export default function App(){
           </div>
 
           <div id="shapes-menu-container" className={`menu-container ${hasModelLoaded ? 'disabled' : ''}`}>
-            <div className="menu-item">Shapes</div>
+            <div className="menu-item" role="button" tabIndex="0" aria-label="Shapes menu">Shapes</div>
             <div className="dropdown-content">
               <a href="#" className="menu-checkbox" onClick={(e) => { e.preventDefault(); if (!hasModelLoaded) setTextured(v => !v) }}>
                 <input type="checkbox" checked={textured} onChange={() => {}} disabled={hasModelLoaded} style={{pointerEvents:'none'}} />
@@ -719,7 +719,7 @@ export default function App(){
           </div>
 
           <div id="settings-menu-container" className="menu-container">
-            <div className="menu-item">Settings</div>
+            <div className="menu-item" role="button" tabIndex="0" aria-label="Settings menu">Settings</div>
             <div className="dropdown-content">
               <div className="menu-label" style={{padding:'4px 12px',opacity:0.6,fontSize:'0.8em',userSelect:'none'}}>Renderer</div>
               <a href="#" style={backend === 'webgl' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setBackend('webgl') }}>WebGL</a>
@@ -761,7 +761,7 @@ export default function App(){
 
         <section className="center-panel">
           <div className="viewport-canvas-wrap">
-            <canvas key={backend} ref={canvasRef} className="viewport-canvas" id="glcanvas" />
+            <canvas key={backend} ref={canvasRef} className="viewport-canvas" id="glcanvas" aria-label="3D scene viewport" />
             <input type="file" id="model-file-input" style={{display:'none'}} accept=".zip,.gltf" multiple />
           </div>
         </section>
@@ -771,7 +771,7 @@ export default function App(){
             {openTabs.map(t=> (
               <div key={t} className={`tab ${resolvedActiveTab===resolveTabKey(t)?'active':''} ${isDirty(resolveTabKey(t))?'dirty':''}`} onClick={()=>setActiveTab(t)}>
                 <span className="tab-label">{t.split('/').pop()}</span>
-                <button className="tab-close" onClick={(e)=>{e.stopPropagation(); closeTab(t)}}>×</button>
+                <button className="tab-close" onClick={(e)=>{e.stopPropagation(); closeTab(t)}} aria-label={`Close ${t.split('/').pop()}`}>×</button>
               </div>
             ))}
           </div>
@@ -785,8 +785,8 @@ export default function App(){
           </div>
 
           <div className="editor-footer">
-            <label style={{display:'inline-flex',alignItems:'center',gap:8}}>
-              <input type="checkbox" checked={autoRefresh} onChange={e=>setAutoRefresh(e.target.checked)} /> Auto Refresh
+            <label htmlFor="auto-refresh-checkbox" style={{display:'inline-flex',alignItems:'center',gap:8}}>
+              <input id="auto-refresh-checkbox" type="checkbox" checked={autoRefresh} onChange={e=>setAutoRefresh(e.target.checked)} /> Auto Refresh
             </label>
             <div style={{marginLeft:'auto',display:'flex',gap:8}}>
               <button onClick={resetActive} disabled={!isEditable(resolvedActiveTab) || !isDirty(resolvedActiveTab)}>Reset</button>

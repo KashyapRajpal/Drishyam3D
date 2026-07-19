@@ -2,14 +2,14 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import './styles.css'
-import logoPng from '@assets/logo/drishyam3d_logo.png'
+import logoJpg from '@assets/logo/drishyam3d_logo.jpg'
 
 const setFavicon = () => {
   try {
     const link = document.getElementById('favicon-link')
-    if (link) link.href = logoPng
+    if (link) link.href = logoJpg
     const apple = document.getElementById('favicon-apple')
-    if (apple) apple.href = logoPng
+    if (apple) apple.href = logoJpg
   } catch (e) {
     // no-op
   }
