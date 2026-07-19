@@ -1,4 +1,4 @@
-import React, {useState, useRef, useEffect, useMemo} from 'react'
+import React, {useState, useRef, useEffect, useMemo, useCallback} from 'react'
 import CodeMirror from 'codemirror'
 import 'codemirror/lib/codemirror.css'
 import 'codemirror/theme/dracula.css'
@@ -25,9 +25,9 @@ import {
   importFolderHandle,
 } from '@engine/scene-ops.js'
 
-const shaderFiles = import.meta.glob('../../assets/shaders/**/*.{vert,frag,glsl,wgsl}', { query: '?raw', import: 'default', eager: true })
-const engineFiles = import.meta.glob('../../scripts/engine/**/*.js', { query: '?raw', import: 'default', eager: true })
-const sceneFilesAll = import.meta.glob('../../scripts/**/*.js', { query: '?raw', import: 'default', eager: true })
+const shaderFiles = import.meta.glob('../../assets/shaders/**/*.{vert,frag,glsl,wgsl}', { query: '?raw', import: 'default' })
+const engineFiles = import.meta.glob('../../scripts/engine/**/*.js', { query: '?raw', import: 'default' })
+const sceneFilesAll = import.meta.glob('../../scripts/**/*.js', { query: '?raw', import: 'default' })
 const sceneFiles = Object.fromEntries(Object.entries(sceneFilesAll).filter(([path]) => !path.includes('/engine/')))
 
 const defaultVertPath = Object.keys(shaderFiles).find((p) => p.endsWith('default.vert'))
@@ -414,6 +414,14 @@ export default function App(){
     ...sceneFiles
   }
 
+  const loadFileContent = useCallback(async (path) => {
+    const fileLoader = fileContentMap[path]
+    if (!fileLoader) return ''
+    if (typeof fileLoader === 'string') return fileLoader
+    if (typeof fileLoader === 'function') return await fileLoader()
+    return ''
+  }, [fileContentMap])
+
   const editableDefaults = useMemo(() => {
     const defaults = {}
     if (sceneScriptPath) defaults[sceneScriptPath] = defaultScript
@@ -425,6 +433,7 @@ export default function App(){
 
   const [fileContents, setFileContents] = useState(() => ({ ...editableDefaults }))
   const [lastApplied, setLastApplied] = useState(() => ({ ...editableDefaults }))
+  const [readOnlyContent, setReadOnlyContent] = useState('')
 
   useEffect(() => {
     // Ensure editable defaults are present in state when paths resolve
@@ -475,6 +484,16 @@ export default function App(){
   }
 
   const resolvedActiveTab = resolveTabKey(activeTab)
+
+  useEffect(() => {
+    if (!resolvedActiveTab) {
+      setReadOnlyContent('')
+      return
+    }
+    const isEditableFile = editableDefaults.hasOwnProperty(resolvedActiveTab)
+    if (isEditableFile) return
+    loadFileContent(resolvedActiveTab).then(setReadOnlyContent).catch(() => setReadOnlyContent(''))
+  }, [resolvedActiveTab, editableDefaults, loadFileContent])
 
   useEffect(() => {
     if (!activeTab && sceneScriptPath) setActiveTab(sceneScriptPath)
@@ -564,10 +583,9 @@ export default function App(){
       )
     }
 
-    const readOnlyValue = fileContentMap[resolvedActiveTab] || ''
     return (
       <CodeEditor
-        value={readOnlyValue}
+        value={readOnlyContent}
         onChange={null}
         mode="javascript"
         readOnly={true}
