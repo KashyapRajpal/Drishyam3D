@@ -4,8 +4,8 @@
  * @license MIT
  */
 
-import { translateMatrix, rotateMatrix } from './matrix.js';
 import { Camera } from './camera.js';
+import { compileUserScript } from './script-runtime.js';
 import { generateCubeData, generateSphereData, resolveTextureUrl } from './geometry.js';
 import { initWebGPU, createRenderPipeline, createVertexBuffer, createIndexBuffer, createTextureFromUrl } from './webgpu-helpers.js';
 import { parsePly } from './ply-loader.js';
@@ -106,15 +106,8 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
     function setScriptSource(source) {
         if (!source) return false;
         try {
-            const scriptModule = new Function('translateMatrix', 'rotateMatrix', 'camera',
-                `${source}\n return { init, update };`
-            )(translateMatrix, rotateMatrix, camera);
-
-            if (scriptModule && typeof scriptModule.init === 'function' && typeof scriptModule.update === 'function') {
-                scene.updateUserScript(scriptModule);
-                return true;
-            }
-            throw new Error("Script must export 'init' and 'update' functions.");
+            scene.updateUserScript(compileUserScript(source, { camera }));
+            return true;
         } catch (e) {
             errorHandler(e);
             return false;

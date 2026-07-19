@@ -22,3 +22,6 @@ Thumbs.db
 
 # Local 3D Gaussian Splatting test data (large .ply / archives)
 assets/3dgs/
+
+# Local glTF model test data (large .bin / 4K textures)
+assets/gltf/
