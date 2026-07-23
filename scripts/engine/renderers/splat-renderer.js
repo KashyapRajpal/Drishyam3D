@@ -18,10 +18,13 @@ import {
     createSplatRenderPipeline,
     createSplatDebugPipeline,
     createSortPipelines,
+    shCoeffCount,
 } from '../splat-helpers.js';
 
 const WORKGROUP_SIZE = 256;
-const RENDER_PARAMS_SIZE = 144; // proj(64) + view(64) + viewport(8) + pad(8)
+// proj(64) + view(64) + viewport(8) + pad(8) + camPos(12) + shDegree(4).
+// camPos lands at byte 144, which is 16-byte aligned as WGSL requires for vec3.
+const RENDER_PARAMS_SIZE = 160;
 const KEYS_PARAMS_SIZE = 80;    // view(64) + count(4) + padded(4) + pad(8)
 const STEP_STRIDE = 256;        // 256B-aligned slice per bitonic stage
 
@@ -37,9 +40,14 @@ export class SplatRenderer extends Renderer {
         this.renderParamsBuffer = null;
         this.keysParamsBuffer = null;
         this.renderParamsData = new Float32Array(RENDER_PARAMS_SIZE / 4);
+        // Aliased u32 view so shDegree can share the render-params scratch buffer.
+        this.renderParamsU32 = new Uint32Array(this.renderParamsData.buffer);
         this.keysParamsData = new ArrayBuffer(KEYS_PARAMS_SIZE);
 
         this.debugMode = 'off'; // 'off' | 'points'
+        // Upper bound on SH degree, for A/B-ing view-dependent colour in the UI.
+        // Effective degree is min(this, the degree the loaded scene provides).
+        this.maxShDegree = 3;
 
         // Per-scene resources (rebuilt in prepare()).
         this.sort = null; // { indexBuffer, keyBuffer, paddedCount, stepBuffer, stages }
@@ -62,6 +70,11 @@ export class SplatRenderer extends Renderer {
         this.debugMode = mode === 'points' ? 'points' : 'off';
     }
 
+    /** Clamp the SH degree used for shading (0 = flat DC colour). */
+    setMaxShDegree(degree) {
+        this.maxShDegree = Math.max(0, Math.min(3, degree | 0));
+    }
+
     /** Bitonic stage (k, j) sequence for a power-of-two length. */
     static _stages(padded) {
         const stages = [];
@@ -73,7 +86,7 @@ export class SplatRenderer extends Renderer {
 
     prepare(drawable) {
         this._releaseSort();
-        if (!drawable || drawable.kind !== 'splat' || !drawable.count) return;
+        if (!drawable || drawable.kind !== 'splat' || !drawable.count || !drawable.shBuffer) return;
         if (!this.renderPipeline || !this.sortPipelines || !this.renderParamsBuffer) return;
 
         const { device } = this;
@@ -126,6 +139,7 @@ export class SplatRenderer extends Renderer {
                     { binding: 0, resource: { buffer: this.renderParamsBuffer } },
                     { binding: 1, resource: { buffer: storageBuffer } },
                     { binding: 2, resource: { buffer: indexBuffer } },
+                    { binding: 3, resource: { buffer: drawable.shBuffer } },
                 ],
             }),
             debug: device.createBindGroup({
@@ -140,14 +154,22 @@ export class SplatRenderer extends Renderer {
     }
 
     record(frame, drawable) {
-        const { device, encoder, targetView, viewMatrix, projectionMatrix, width, height } = frame;
+        const { device, encoder, targetView, camera, viewMatrix, projectionMatrix, width, height } = frame;
         if (!this.renderPipeline || !this.sort || !this.bindGroups || !drawable.count) return;
 
-        // Upload render params (proj, view, viewport).
+        // Upload render params (proj, view, viewport, camera position, SH degree).
         this.renderParamsData.set(projectionMatrix, 0);
         this.renderParamsData.set(viewMatrix, 16);
         this.renderParamsData[32] = width;
         this.renderParamsData[33] = height;
+        // Buffer stride is fixed by the loaded scene; the displayed degree is clamped
+        // independently, so lowering it must not shift where each splat's SH starts.
+        this.renderParamsU32[34] = shCoeffCount(drawable.shDegree ?? 0);
+        const eye = camera?.getPosition?.() ?? [0, 0, 0];
+        this.renderParamsData[36] = eye[0];
+        this.renderParamsData[37] = eye[1];
+        this.renderParamsData[38] = eye[2];
+        this.renderParamsU32[39] = Math.min(drawable.shDegree ?? 0, this.maxShDegree);
         device.queue.writeBuffer(this.renderParamsBuffer, 0, this.renderParamsData);
 
         const colorAttachment = {
@@ -208,8 +230,9 @@ export class SplatRenderer extends Renderer {
     }
 
     releaseDrawable(drawable) {
-        // The storage buffer is owned by the drawable (created by the facade).
+        // The storage and SH buffers are owned by the drawable (created by the facade).
         if (drawable?.storageBuffer?.destroy) drawable.storageBuffer.destroy();
+        if (drawable?.shBuffer?.destroy) drawable.shBuffer.destroy();
         this._releaseSort();
     }
 

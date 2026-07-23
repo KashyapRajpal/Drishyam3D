@@ -8,6 +8,8 @@
  * and pipelines used by SplatRenderer.
  */
 
+import { SH_REST_PER_CHANNEL } from './ply-loader.js';
+
 // Floats per splat in the packed storage layout (64 bytes, std-friendly).
 //   [0..2] position xyz, [3] pad
 //   [4..6] color rgb,    [7] opacity
@@ -15,6 +17,72 @@
 //   [12..14] cov σyy,σyz,σzz, [15] pad
 export const SPLAT_FLOATS = 16;
 export const SPLAT_STRIDE = SPLAT_FLOATS * 4; // bytes
+
+// Non-DC SH lives in its own storage buffer, kept out of the 64-byte splat struct
+// above so the depth sort (which only reads position) stays cache-friendly.
+// Laid out as flat f32 — NOT array<vec3<f32>>, whose 16-byte alignment would
+// waste 4 bytes per coefficient.
+
+/** Non-DC SH coefficients per splat at a given degree (deg 3 = 15). */
+export function shCoeffCount(degree) {
+    return SH_REST_PER_CHANNEL[degree] ?? 0;
+}
+
+/** Bytes of non-DC SH per splat at a given degree (deg 3 = 15 coeffs x rgb x 4B = 180B). */
+export function shBytesPerSplat(degree) {
+    return shCoeffCount(degree) * 3 * 4;
+}
+
+/**
+ * Highest SH degree whose buffer fits within the device's storage-binding limit.
+ * Degree 3 at 180 B/splat exceeds the default 128 MB limit past ~745k splats, so
+ * large scenes silently degrade rather than failing to load.
+ *
+ * @param {number} requestedDegree Degree actually present in the file.
+ * @param {number} count Splat count.
+ * @param {number} maxBindingSize `device.limits.maxStorageBufferBindingSize`.
+ * @returns {number} Degree to use (<= requestedDegree).
+ */
+export function fitShDegree(requestedDegree, count, maxBindingSize) {
+    let degree = requestedDegree;
+    while (degree > 0 && count * shBytesPerSplat(degree) > maxBindingSize) {
+        degree--;
+    }
+    return degree;
+}
+
+/**
+ * Truncates coefficient-major SH data from `sourceDegree` down to `targetDegree`.
+ * Returns the input untouched when the degrees already match.
+ */
+export function packShCoeffs(shCoeffs, count, sourceDegree, targetDegree) {
+    if (!shCoeffs || targetDegree <= 0) return null;
+    if (targetDegree === sourceDegree) return shCoeffs;
+
+    const srcStride = SH_REST_PER_CHANNEL[sourceDegree] * 3;
+    const dstStride = SH_REST_PER_CHANNEL[targetDegree] * 3;
+    const out = new Float32Array(count * dstStride);
+    for (let i = 0; i < count; i++) {
+        // Lower degrees are a prefix of higher ones, so a straight copy suffices.
+        out.set(shCoeffs.subarray(i * srcStride, i * srcStride + dstStride), i * dstStride);
+    }
+    return out;
+}
+
+/**
+ * Storage buffer holding non-DC SH coefficients, read by the splat vertex shader.
+ * When a scene has no usable SH a 16-byte placeholder is returned: the WGSL
+ * binding always exists, and the shader guards on `shDegree == 0` before reading.
+ */
+export function createShStorageBuffer(device, shCoeffs) {
+    const data = shCoeffs && shCoeffs.length > 0 ? shCoeffs : new Float32Array(4);
+    const buffer = device.createBuffer({
+        size: data.byteLength,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(buffer, 0, data);
+    return buffer;
+}
 
 /** Smallest power of two >= n (>=1). Used to pad the sort arrays for bitonic sort. */
 export function nextPow2(n) {

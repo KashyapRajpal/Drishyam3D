@@ -8,6 +8,9 @@ import {
   createSplatRenderPipeline,
   createSplatDebugPipeline,
   createSortPipelines,
+  shBytesPerSplat,
+  fitShDegree,
+  packShCoeffs,
 } from '../scripts/engine/splat-helpers.js';
 
 // Single-splat parsed input with identity rotation; scale varies per test.
@@ -127,5 +130,60 @@ describe('GPU resource helpers (mocked device)', () => {
     expect(device.createComputePipeline).toHaveBeenCalledTimes(2);
     expect(keys.desc.compute.entryPoint).toBe('compute_keys');
     expect(step.desc.compute.entryPoint).toBe('bitonic_step');
+  });
+});
+
+describe('shBytesPerSplat', () => {
+  test.each([[0, 0], [1, 36], [2, 96], [3, 180]])(
+    'degree %i costs %i bytes per splat', (degree, expected) => {
+      expect(shBytesPerSplat(degree)).toBe(expected);
+    });
+});
+
+describe('fitShDegree', () => {
+  const LIMIT_128MB = 128 * 1024 * 1024;
+
+  test('keeps the requested degree when it fits', () => {
+    expect(fitShDegree(3, 100_000, LIMIT_128MB)).toBe(3);
+  });
+
+  test('degrades rather than exceeding the storage-binding limit', () => {
+    // Degree 3 at 180 B/splat needs ~180 MB for 1M splats, over the 128 MB limit.
+    const degree = fitShDegree(3, 1_000_000, LIMIT_128MB);
+    expect(degree).toBeLessThan(3);
+    expect(1_000_000 * shBytesPerSplat(degree)).toBeLessThanOrEqual(LIMIT_128MB);
+  });
+
+  test('never raises the degree above what the file provides', () => {
+    expect(fitShDegree(1, 10, LIMIT_128MB)).toBe(1);
+    expect(fitShDegree(0, 10, LIMIT_128MB)).toBe(0);
+  });
+
+  test('falls back to 0 when even degree 1 will not fit', () => {
+    expect(fitShDegree(3, 1_000_000, 1024)).toBe(0);
+  });
+});
+
+describe('packShCoeffs', () => {
+  // Two splats, degree 2 (8 coefficients x rgb = 24 floats each).
+  const source = new Float32Array(48);
+  for (let i = 0; i < 48; i++) source[i] = i;
+
+  test('returns the input untouched when degrees match', () => {
+    expect(packShCoeffs(source, 2, 2, 2)).toBe(source);
+  });
+
+  test('truncates to the lower degree, preserving per-splat blocks', () => {
+    // Degree 1 keeps the first 3 coefficients (9 floats) of each splat's 24.
+    const out = packShCoeffs(source, 2, 2, 1);
+    expect(out).toHaveLength(18);
+    expect(Array.from(out.subarray(0, 9))).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    // Splat 1's block starts at source offset 24, not 9.
+    expect(Array.from(out.subarray(9, 18))).toEqual([24, 25, 26, 27, 28, 29, 30, 31, 32]);
+  });
+
+  test('returns null when the target degree is 0 or there is no data', () => {
+    expect(packShCoeffs(source, 2, 2, 0)).toBeNull();
+    expect(packShCoeffs(null, 2, 2, 3)).toBeNull();
   });
 });

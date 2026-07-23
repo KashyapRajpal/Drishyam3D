@@ -83,6 +83,7 @@ export async function initWebGLEngine({ canvas, shaderSources, scriptSource, onE
         camera,
         setShaders,
         setScriptSource,
+        getStats: () => scene.getStats(),
         destroy: () => scene.destroy(),
     };
 }

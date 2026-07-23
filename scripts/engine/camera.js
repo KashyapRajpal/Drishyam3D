@@ -20,6 +20,9 @@ export class Camera {
         this.lastMousePosition = { x: 0, y: 0 };
 
         this.viewMatrix = createIdentityMatrix();
+        // World-space eye position, refreshed by updateViewMatrix(). Needed by
+        // view-dependent shading (e.g. spherical harmonics) as well as the view matrix.
+        this.eye = [...initialPosition];
         this.initEventListeners();
     }
 
@@ -71,10 +74,16 @@ export class Camera {
             this.zoom * Math.cos(this.rotation.y) * Math.cos(this.rotation.x)
         ];
 
+        this.eye = eye;
         this.viewMatrix = createLookAtMatrix(eye, this.target, this.up);
     }
 
     getViewMatrix() {
         return this.viewMatrix;
+    }
+
+    /** World-space camera position (the eye used to build the view matrix). */
+    getPosition() {
+        return this.eye;
     }
 }

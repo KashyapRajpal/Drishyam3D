@@ -68,6 +68,31 @@ function normalizeText(value) {
   return String(value).replace(/\r\n/g, '\n')
 }
 
+function StatsOverlay({ stats }) {
+  if (!stats) return null
+  return (
+    <div style={{
+      position: 'absolute',
+      top: '10px',
+      right: '10px',
+      background: 'rgba(0,0,0,0.7)',
+      color: '#0f0',
+      fontFamily: 'monospace',
+      fontSize: '12px',
+      padding: '8px 12px',
+      borderRadius: '4px',
+      lineHeight: '1.6',
+      pointerEvents: 'none',
+      zIndex: 1000,
+    }}>
+      <div>{stats.fps} fps ({stats.frameMs}ms)</div>
+      <div>{stats.drawableKind}</div>
+      {stats.triangleCount > 0 && <div>{(stats.triangleCount/1000).toFixed(1)}k tris</div>}
+      {stats.splatCount > 0 && <div>{(stats.splatCount/1000).toFixed(1)}k splats</div>}
+    </div>
+  )
+}
+
 function CodeEditor({ value, onChange, mode, readOnly }) {
   const hostRef = useRef(null)
   const cmRef = useRef(null)
@@ -122,6 +147,9 @@ export default function App(){
   const [hasModelLoaded, setHasModelLoaded] = useState(false)
   const [splatLoaded, setSplatLoaded] = useState(false)
   const [splatDebug, setSplatDebug] = useState('off') // 'off' | 'points'
+  const [shDegree, setShDegree] = useState(3) // max SH degree used for splat shading
+  const [showStats, setShowStats] = useState(false)
+  const [stats, setStats] = useState(null)
   const [engineReady, setEngineReady] = useState(0)
   const canvasRef = useRef(null)
   const engineRef = useRef(null)
@@ -194,6 +222,7 @@ export default function App(){
     setTextured(false)
     setSplatLoaded(false)
     setSplatDebug('off')
+    setShDegree(3)
   }, [backend])
 
   // Apply the splat debug mode to the active engine.
@@ -204,6 +233,27 @@ export default function App(){
       engine.setSplatDebugMode(splatDebug)
     }
   }, [engineReady, splatDebug, splatLoaded])
+
+  // Apply the SH degree cap to the active engine.
+  useEffect(() => {
+    if (!engineReady) return
+    const engine = engineRef.current
+    if (engine && typeof engine.setSplatShDegree === 'function') {
+      engine.setSplatShDegree(shDegree)
+    }
+  }, [engineReady, shDegree, splatLoaded])
+
+  // Poll stats when visible.
+  useEffect(() => {
+    if (!showStats || !engineReady) return
+    const engine = engineRef.current
+    const timer = setInterval(() => {
+      if (engine && typeof engine.getStats === 'function') {
+        setStats(engine.getStats())
+      }
+    }, 200)
+    return () => clearInterval(timer)
+  }, [showStats, engineReady])
 
   // Drive the current shape from React state. Reacts to shape/textured/engine changes.
   useEffect(() => {
@@ -730,8 +780,24 @@ export default function App(){
                   <div className="menu-label" style={{padding:'4px 12px',opacity:0.6,fontSize:'0.8em',userSelect:'none'}}>Splat Debug</div>
                   <a href="#" style={splatDebug === 'off' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setSplatDebug('off') }}>Off</a>
                   <a href="#" style={splatDebug === 'points' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setSplatDebug('points') }}>Points</a>
+                  <div className="menu-separator"></div>
+                  <div className="menu-label" style={{padding:'4px 12px',opacity:0.6,fontSize:'0.8em',userSelect:'none'}}>SH Degree</div>
+                  {[0, 1, 2, 3].map((d) => (
+                    <a
+                      key={d}
+                      href="#"
+                      style={shDegree === d ? {fontWeight:'bold'} : {}}
+                      title={d === 0 ? 'Flat DC colour (no view-dependent shading)' : `Spherical harmonics up to degree ${d}`}
+                      onClick={(e) => { e.preventDefault(); setShDegree(d) }}
+                    >{d === 0 ? '0 (flat)' : String(d)}</a>
+                  ))}
                 </>
               )}
+              <div className="menu-separator"></div>
+              <a href="#" className="menu-checkbox" onClick={(e) => { e.preventDefault(); setShowStats(v => !v) }}>
+                <input type="checkbox" checked={showStats} onChange={() => {}} style={{pointerEvents:'none'}} />
+                <label style={showStats ? {fontWeight:'bold'} : {}}>Show Stats</label>
+              </a>
             </div>
           </div>
         </nav>
@@ -760,8 +826,9 @@ export default function App(){
         </aside>
 
         <section className="center-panel">
-          <div className="viewport-canvas-wrap">
+          <div className="viewport-canvas-wrap" style={{position:'relative'}}>
             <canvas key={backend} ref={canvasRef} className="viewport-canvas" id="glcanvas" aria-label="3D scene viewport" />
+            <StatsOverlay stats={showStats ? stats : null} />
             <input type="file" id="model-file-input" style={{display:'none'}} accept=".zip,.gltf" multiple />
           </div>
         </section>

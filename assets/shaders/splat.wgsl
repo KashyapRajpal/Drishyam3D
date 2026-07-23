@@ -9,7 +9,13 @@ struct RenderParams {
     proj     : mat4x4<f32>,
     view     : mat4x4<f32>,
     viewport : vec2<f32>,
-    _pad     : vec2<f32>,
+    // Coefficients per splat actually stored in shCoeffs. This is fixed by the
+    // loaded scene and is NOT the same as shDegree: clamping the displayed degree
+    // must not change the buffer stride, or reads go out of alignment.
+    shStride : u32,
+    _pad0    : u32,
+    camPos   : vec3<f32>, // world-space eye, for view-dependent SH
+    shDegree : u32,       // degrees to evaluate; 0 = DC only
 }
 
 struct Splat {
@@ -22,6 +28,61 @@ struct Splat {
 @group(0) @binding(0) var<uniform> params : RenderParams;
 @group(0) @binding(1) var<storage, read> splats : array<Splat>;
 @group(0) @binding(2) var<storage, read> indices : array<u32>;
+// Non-DC SH, coefficient-major rgb triples. Flat f32 rather than array<vec3<f32>>,
+// whose 16-byte alignment would waste 4 bytes per coefficient.
+@group(0) @binding(3) var<storage, read> shCoeffs : array<f32>;
+
+// Real-SH basis constants for degrees 1-3.
+const SH_C1 : f32 = 0.4886025119029199;
+const SH_C2 = array<f32, 5>(
+     1.0925484305920792, -1.0925484305920792,  0.31539156525252005,
+    -1.0925484305920792,  0.5462742152960396,
+);
+const SH_C3 = array<f32, 7>(
+    -0.5900435899266435,  2.890611442640554,  -0.4570457994644658,
+     0.3731763325901154, -0.4570457994644658,  1.445305721320277,
+    -0.5900435899266435,
+);
+
+fn shCoeff(base : u32, k : u32) -> vec3<f32> {
+    let o = base + k * 3u;
+    return vec3<f32>(shCoeffs[o], shCoeffs[o + 1u], shCoeffs[o + 2u]);
+}
+
+/// View-dependent colour offset added to the DC term. `dir` must be normalized.
+fn evalSh(splatIndex : u32, dir : vec3<f32>) -> vec3<f32> {
+    if (params.shDegree == 0u) {
+        return vec3<f32>(0.0);
+    }
+    // Stride comes from the buffer, not the displayed degree.
+    let base = splatIndex * params.shStride * 3u;
+    let x = dir.x;
+    let y = dir.y;
+    let z = dir.z;
+
+    var result = SH_C1 * (-y * shCoeff(base, 0u) + z * shCoeff(base, 1u) - x * shCoeff(base, 2u));
+
+    if (params.shDegree >= 2u) {
+        let xx = x * x; let yy = y * y; let zz = z * z;
+        let xy = x * y; let yz = y * z; let xz = x * z;
+        result += SH_C2[0] * xy * shCoeff(base, 3u)
+                + SH_C2[1] * yz * shCoeff(base, 4u)
+                + SH_C2[2] * (2.0 * zz - xx - yy) * shCoeff(base, 5u)
+                + SH_C2[3] * xz * shCoeff(base, 6u)
+                + SH_C2[4] * (xx - yy) * shCoeff(base, 7u);
+
+        if (params.shDegree >= 3u) {
+            result += SH_C3[0] * y * (3.0 * xx - yy) * shCoeff(base, 8u)
+                    + SH_C3[1] * xy * z * shCoeff(base, 9u)
+                    + SH_C3[2] * y * (4.0 * zz - xx - yy) * shCoeff(base, 10u)
+                    + SH_C3[3] * z * (2.0 * zz - 3.0 * xx - 3.0 * yy) * shCoeff(base, 11u)
+                    + SH_C3[4] * x * (4.0 * zz - xx - yy) * shCoeff(base, 12u)
+                    + SH_C3[5] * z * (xx - yy) * shCoeff(base, 13u)
+                    + SH_C3[6] * x * (xx - 3.0 * yy) * shCoeff(base, 14u);
+        }
+    }
+    return result;
+}
 
 struct VertexOut {
     @builtin(position) position : vec4<f32>,
@@ -41,7 +102,8 @@ const QUAD = array<vec2<f32>, 4>(
 fn vs_main(@builtin(vertex_index) vid : u32, @builtin(instance_index) iid : u32) -> VertexOut {
     var out : VertexOut;
 
-    let s = splats[indices[iid]];
+    let si = indices[iid];
+    let s = splats[si];
     let center = s.posPad.xyz;
     let cam = params.view * vec4<f32>(center, 1.0);
     let pos2d = params.proj * cam;
@@ -100,8 +162,13 @@ fn vs_main(@builtin(vertex_index) vid : u32, @builtin(instance_index) iid : u32)
     let centerNDC = pos2d.xy / pos2d.w;
     let offset = (corner.x * majorAxis + corner.y * minorAxis) / params.viewport;
 
+    // View-dependent colour: DC term (already baked to 0.5 + SH_C0*f_dc on load)
+    // plus the non-DC SH contribution, clamped to non-negative as per 3DGS.
+    let viewDir = normalize(center - params.camPos);
+    let rgb = max(s.colorOpacity.rgb + evalSh(si, viewDir), vec3<f32>(0.0));
+
     out.position = vec4<f32>(centerNDC + offset, 0.0, 1.0);
-    out.color = s.colorOpacity;
+    out.color = vec4<f32>(rgb, s.colorOpacity.a);
     out.local = corner;
     return out;
 }

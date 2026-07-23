@@ -18,6 +18,7 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
     let drawable = null;
     let active = true; // Set to false by destroy() to stop this scene's render loop
     let then = 0;
+    let fpsAccum = 0, fpsCount = 0, displayFps = 0, displayMs = 0;
 
     let userScript = { init: () => {}, update: () => {} };
     const sceneState = { modelRotation: 0.0, modelViewMatrix: null };
@@ -83,6 +84,18 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
         now *= 0.001;
         const deltaTime = now - then;
         then = now;
+
+        // Rolling FPS (update display every ~500ms).
+        if (deltaTime > 0) {
+            fpsAccum += 1 / deltaTime;
+            fpsCount++;
+            if (fpsCount >= 30) {
+                displayFps = Math.round(fpsAccum / fpsCount);
+                displayMs = Math.round((1000 / displayFps) * 100) / 100;
+                fpsAccum = 0;
+                fpsCount = 0;
+            }
+        }
 
         const current = getDrawable();
         const renderer = rendererFor(current);
@@ -161,11 +174,27 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
             forceUpdate();
         },
 
+        setSplatShDegree(degree) {
+            splatRenderer.setMaxShDegree(degree);
+            forceUpdate();
+        },
+
         loadGeometry(newDrawable) {
             setDrawable(newDrawable);
         },
 
         getDrawable,
+
+        getStats() {
+            return {
+                backend: 'webgpu',
+                fps: displayFps,
+                frameMs: displayMs,
+                drawableKind: drawable?.kind ?? 'none',
+                triangleCount: drawable?.kind === 'mesh' ? drawable.vertexCount / 3 : 0,
+                splatCount: drawable?.kind === 'splat' ? drawable.count : 0,
+            };
+        },
 
         destroy() {
             active = false;

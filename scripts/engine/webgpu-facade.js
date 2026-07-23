@@ -9,7 +9,13 @@ import { compileUserScript } from './script-runtime.js';
 import { generateCubeData, generateSphereData, resolveTextureUrl } from './geometry.js';
 import { initWebGPU, createRenderPipeline, createVertexBuffer, createIndexBuffer, createTextureFromUrl } from './webgpu-helpers.js';
 import { parsePly } from './ply-loader.js';
-import { packSplats, createSplatStorageBuffer } from './splat-helpers.js';
+import {
+    packSplats,
+    createSplatStorageBuffer,
+    createShStorageBuffer,
+    packShCoeffs,
+    fitShDegree,
+} from './splat-helpers.js';
 import { createWebGPUScene } from './webgpu-scene.js';
 
 export function buildDrawableFromData(device, data, texture = null, name = 'drawable') {
@@ -116,16 +122,41 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
 
     /**
      * Parses a 3DGS .ply ArrayBuffer and loads it as a splat drawable.
+     *
+     * View-dependent colour uses whatever SH degree the file provides, capped to
+     * what fits the device's storage-binding limit — degree 3 costs 180 B/splat,
+     * so very large scenes degrade to a lower degree instead of failing to load.
+     *
      * @param {ArrayBuffer} arrayBuffer
-     * @returns {{ kind: 'splat', storageBuffer: GPUBuffer, count: number, bounds: object|null }}
+     * @returns {{ kind: 'splat', storageBuffer: GPUBuffer, shBuffer: GPUBuffer,
+     *            shDegree: number, count: number, bounds: object|null }}
      */
     function loadSplats(arrayBuffer) {
         const parsed = parsePly(arrayBuffer);
         const packed = packSplats(parsed);
         const storageBuffer = createSplatStorageBuffer(device, packed);
+
+        const shDegree = fitShDegree(
+            parsed.shDegree,
+            parsed.count,
+            device.limits.maxStorageBufferBindingSize,
+        );
+        if (shDegree < parsed.shDegree) {
+            console.warn(
+                `Splat SH degree reduced ${parsed.shDegree} -> ${shDegree} to fit ` +
+                `maxStorageBufferBindingSize (${device.limits.maxStorageBufferBindingSize} bytes).`,
+            );
+        }
+        const shBuffer = createShStorageBuffer(
+            device,
+            packShCoeffs(parsed.shCoeffs, parsed.count, parsed.shDegree, shDegree),
+        );
+
         const drawable = {
             kind: 'splat',
             storageBuffer,
+            shBuffer,
+            shDegree,
             count: parsed.count,
             bounds: parsed.bounds,
             _debug: { name: 'splat cloud' },
@@ -136,6 +167,11 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
 
     function setSplatDebugMode(mode) {
         scene.setSplatDebugMode(mode);
+    }
+
+    /** Clamp the SH degree used for splat shading (0 = flat DC colour). */
+    function setSplatShDegree(degree) {
+        scene.setSplatShDegree(degree);
     }
 
     if (!shaderSources?.wgsl) {
@@ -153,7 +189,8 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
     return {
         device, scene, camera,
         setShaders, setScriptSource,
-        loadSplats, setSplatDebugMode,
+        loadSplats, setSplatDebugMode, setSplatShDegree,
+        getStats: () => scene.getStats(),
         destroy: () => scene.destroy(),
     };
 }

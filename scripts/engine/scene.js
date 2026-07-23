@@ -189,6 +189,7 @@ export function createScene(gl, canvas, camera) {
 
     let then = 0;
     let active = true; // Set to false by destroy() to stop this scene's render loop
+    let fpsAccum = 0, fpsCount = 0, displayFps = 0, displayMs = 0;
 
     function forceUpdate({ reinitScript = false } = {}) {
         if (!active) return;
@@ -207,6 +208,18 @@ export function createScene(gl, canvas, camera) {
         now *= 0.001; // Convert to seconds
         const deltaTime = now - then;
         then = now;
+
+        // Rolling FPS (update display every ~500ms).
+        if (deltaTime > 0) {
+            fpsAccum += 1 / deltaTime;
+            fpsCount++;
+            if (fpsCount >= 30) {
+                displayFps = Math.round(fpsAccum / fpsCount);
+                displayMs = Math.round((1000 / displayFps) * 100) / 100;
+                fpsAccum = 0;
+                fpsCount = 0;
+            }
+        }
 
         const drawable = getDrawable();
 
@@ -355,6 +368,14 @@ export function createScene(gl, canvas, camera) {
             const updated = setDrawable(newDrawable, 'loadGeometry');
             console.trace('loadGeometry stack');
         },
+        getStats: () => ({
+            backend: 'webgl',
+            fps: displayFps,
+            frameMs: displayMs,
+            drawableKind: getDrawable()?.kind ?? 'none',
+            triangleCount: getDrawable()?.vertexCount ? getDrawable().vertexCount / 3 : 0,
+            splatCount: 0,
+        }),
         destroy: () => {
             active = false;
             _drawable = null;

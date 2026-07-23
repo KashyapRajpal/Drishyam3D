@@ -13,6 +13,32 @@ export const SH_C0 = 0.28209479177387814;
 
 export const sigmoid = (x) => 1 / (1 + Math.exp(-x));
 
+// Non-DC SH coefficients per colour channel, by degree (3 for deg 1, +5 for deg 2, +7 for deg 3).
+export const SH_REST_PER_CHANNEL = { 0: 0, 1: 3, 2: 8, 3: 15 };
+
+/**
+ * Per-channel indices of the non-DC SH basis functions that are ODD in y.
+ *
+ * parsePly mirrors the scene about the y axis (see the Y-flip below). Spherical
+ * harmonics are fit in the original space, so evaluating them against a view
+ * direction in the mirrored space is wrong unless the basis functions that
+ * change sign under y -> -y have their coefficients negated to match:
+ *   deg 1: Y(1,-1) ~ y                     -> index 0
+ *   deg 2: Y(2,-2) ~ xy, Y(2,-1) ~ yz      -> indices 3, 4
+ *   deg 3: Y(3,-3) ~ y(3x²-y²),
+ *          Y(3,-2) ~ xyz,
+ *          Y(3,-1) ~ y(4z²-x²-y²)          -> indices 8, 9, 10
+ */
+export const SH_REST_FLIP_Y = new Set([0, 3, 4, 8, 9, 10]);
+
+/** Highest SH degree fully covered by `restPerChannel` stored coefficients. */
+export function shDegreeFromRestCount(restPerChannel) {
+    if (restPerChannel >= 15) return 3;
+    if (restPerChannel >= 8) return 2;
+    if (restPerChannel >= 3) return 1;
+    return 0;
+}
+
 // PLY property type -> { size in bytes, DataView getter name }.
 const PLY_TYPES = {
     char:   { size: 1, get: 'getInt8' },
@@ -92,10 +118,16 @@ function parseHeader(bytes) {
  * activations applied (opacity=sigmoid, scale=exp, rotation normalized,
  * color from SH degree-0).
  *
+ * Non-DC spherical harmonics (`f_rest_*`) are read when present. In the file they
+ * are channel-major (`f_rest_0..14` = R, `15..29` = G, `30..44` = B for degree 3);
+ * `shCoeffs` re-interleaves them coefficient-major as consecutive rgb triples so
+ * the shader can read one vec3 per coefficient.
+ *
  * @param {ArrayBuffer} arrayBuffer
  * @returns {{
  *   positions: Float32Array, colors: Float32Array, opacities: Float32Array,
  *   scales: Float32Array, rotations: Float32Array, count: number,
+ *   shCoeffs: Float32Array|null, shDegree: number,
  *   bounds: { center: [number,number,number], radius: number } | null
  * }}
  */
@@ -127,6 +159,29 @@ export function parsePly(arrayBuffer) {
     const opacities = new Float32Array(vertexCount);
     const scales = new Float32Array(vertexCount * 3);
     const rotations = new Float32Array(vertexCount * 4);
+
+    // --- Non-DC spherical harmonics ---------------------------------------
+    // Count the contiguous f_rest_* run, then keep only the coefficients of the
+    // highest degree the file fully covers (a partial degree is unusable).
+    let restCount = 0;
+    while (has(`f_rest_${restCount}`)) restCount++;
+    const restPerChannel = Math.floor(restCount / 3);
+    const shDegree = shDegreeFromRestCount(restPerChannel);
+    const shPerChannel = SH_REST_PER_CHANNEL[shDegree];
+
+    // Resolve the DataView accessors once, in output order (coefficient-major
+    // rgb triples), instead of rebuilding `f_rest_N` strings per vertex.
+    const shReaders = [];
+    const shSigns = [];
+    for (let k = 0; k < shPerChannel; k++) {
+        const sign = SH_REST_FLIP_Y.has(k) ? -1 : 1;
+        for (let c = 0; c < 3; c++) {
+            shReaders.push(offsets[`f_rest_${c * restPerChannel + k}`]);
+            shSigns.push(sign);
+        }
+    }
+    const shStride = shPerChannel * 3;
+    const shCoeffs = shPerChannel > 0 ? new Float32Array(vertexCount * shStride) : null;
 
     let cx = 0, cy = 0, cz = 0;
 
@@ -174,6 +229,15 @@ export function parsePly(arrayBuffer) {
         rotations[i * 4 + 1] = qx;
         rotations[i * 4 + 2] = qy;
         rotations[i * 4 + 3] = qz;
+
+        // SH rest terms, sign-corrected for the Y-flip above.
+        if (shCoeffs) {
+            const shBase = i * shStride;
+            for (let n = 0; n < shStride; n++) {
+                const p = shReaders[n];
+                shCoeffs[shBase + n] = shSigns[n] * view[p.get](base + p.off, littleEndian);
+            }
+        }
     }
 
     let bounds = null;
@@ -190,5 +254,8 @@ export function parsePly(arrayBuffer) {
         bounds = { center, radius };
     }
 
-    return { positions, colors, opacities, scales, rotations, count: vertexCount, bounds };
+    return {
+        positions, colors, opacities, scales, rotations,
+        count: vertexCount, shCoeffs, shDegree, bounds,
+    };
 }
