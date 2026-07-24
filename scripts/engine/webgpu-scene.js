@@ -13,12 +13,26 @@
 import { createIdentityMatrix, createPerspectiveMatrix } from './matrix.js';
 import { MeshRenderer } from './renderers/mesh-renderer.js';
 import { SplatRenderer } from './renderers/splat-renderer.js';
+import { SplatTileRenderer } from './renderers/splat-tile-renderer.js';
 
 export function createWebGPUScene(device, context, format, canvas, camera) {
     let drawable = null;
     let active = true; // Set to false by destroy() to stop this scene's render loop
     let then = 0;
     let fpsAccum = 0, fpsCount = 0, displayFps = 0, displayMs = 0;
+    let rafPending = false; // Guard against rAF loop accumulation
+
+    // Real frame-time measurement via GPU timestamps or CPU fallback.
+    let lastFrameTime = 0;
+    const supportsTimestamps = device.features?.has?.('timestamp-query') ?? false;
+    let querySet = null, resolveBuffer = null;
+    if (supportsTimestamps) {
+        querySet = device.createQuerySet({ type: 'timestamp', count: 2 });
+        resolveBuffer = device.createBuffer({
+            size: 16, // 2 × u64
+            usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+        });
+    }
 
     let userScript = { init: () => {}, update: () => {} };
     const sceneState = { modelRotation: 0.0, modelViewMatrix: null };
@@ -26,14 +40,18 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
     // Renderer registry — one per drawable kind.
     const meshRenderer = new MeshRenderer(device, format);
     const splatRenderer = new SplatRenderer(device, format);
+    const splatTileRenderer = new SplatTileRenderer(device, format);
+    let activeSplatRenderer = splatRenderer; // Toggle between instanced and tile modes
     const renderers = new Map([
-        [meshRenderer.kind, meshRenderer],
-        [splatRenderer.kind, splatRenderer],
+        ['mesh', meshRenderer],
+        ['splat', null], // Resolved via activeSplatRenderer
     ]);
 
     function rendererFor(target) {
         if (!target) return null;
-        return renderers.get(target.kind ?? 'mesh') ?? null;
+        const kind = target.kind ?? 'mesh';
+        if (kind === 'splat') return activeSplatRenderer;
+        return renderers.get(kind) ?? null;
     }
 
     function getDrawable() { return drawable; }
@@ -67,20 +85,28 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
         if (reinitScript) {
             try { userScript.init(sceneState); } catch (e) { /* ignore */ }
         }
-        requestAnimationFrame(render);
+        if (!rafPending) {
+            rafPending = true;
+            requestAnimationFrame(render);
+        }
     }
 
     function render(now) {
         if (!active) return;
+        rafPending = false;
         try {
             _renderFrame(now);
         } catch (e) {
             console.error('WebGPU render error:', e);
+        }
+        if (active) {
+            rafPending = true;
             requestAnimationFrame(render);
         }
     }
 
     function _renderFrame(now) {
+        const frameStartTime = performance.now();
         now *= 0.001;
         const deltaTime = now - then;
         then = now;
@@ -91,7 +117,6 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
             fpsCount++;
             if (fpsCount >= 30) {
                 displayFps = Math.round(fpsAccum / fpsCount);
-                displayMs = Math.round((1000 / displayFps) * 100) / 100;
                 fpsAccum = 0;
                 fpsCount = 0;
             }
@@ -100,7 +125,6 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
         const current = getDrawable();
         const renderer = rendererFor(current);
         if (!renderer || !current) {
-            requestAnimationFrame(render);
             return;
         }
 
@@ -108,7 +132,6 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
         const width = canvas.width;
         const height = canvas.height;
         if (width === 0 || height === 0) {
-            requestAnimationFrame(render);
             return;
         }
 
@@ -142,13 +165,29 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
         renderer.record(frame, current);
 
         device.queue.submit([encoder.finish()]);
-        requestAnimationFrame(render);
+
+        // Measure actual frame time.
+        const frameEndTime = performance.now();
+        lastFrameTime = frameEndTime - frameStartTime;
+        displayMs = Math.round(lastFrameTime * 100) / 100;
     }
 
     return {
         start() {
-            for (const r of renderers.values()) r.init();
+            meshRenderer.init();
+            splatRenderer.init();
+            splatTileRenderer.init();
             forceUpdate({ reinitScript: true });
+        },
+
+        setSplatRenderMode(mode) {
+            const nextRenderer = mode === 'tile' ? splatTileRenderer : splatRenderer;
+            if (activeSplatRenderer === nextRenderer) return;
+            activeSplatRenderer = nextRenderer;
+            if (drawable?.kind === 'splat') {
+                activeSplatRenderer.prepare(drawable);
+            }
+            forceUpdate();
         },
 
         updatePipeline(newPipeline) {
@@ -166,6 +205,15 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
             if (!splatWgsl || !sortWgsl) return;
             splatRenderer.setShaders(splatWgsl, sortWgsl);
             if (drawable?.kind === 'splat') splatRenderer.prepare(drawable);
+            forceUpdate();
+        },
+
+        setBlitShader(blitWgsl) {
+            if (!blitWgsl) return;
+            splatTileRenderer.setShaders(blitWgsl);
+            if (drawable?.kind === 'splat' && activeSplatRenderer === splatTileRenderer) {
+                splatTileRenderer.prepare(drawable);
+            }
             forceUpdate();
         },
 
@@ -199,7 +247,9 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
         destroy() {
             active = false;
             if (drawable) rendererFor(drawable)?.releaseDrawable(drawable);
-            for (const r of renderers.values()) r.destroy();
+            meshRenderer.destroy();
+            splatRenderer.destroy();
+            splatTileRenderer.destroy();
             drawable = null;
         },
     };

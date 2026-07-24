@@ -13,6 +13,7 @@ import defaultFrag from '@assets/shaders/default.frag?raw'
 import defaultWgsl from '@assets/shaders/default.wgsl?raw'
 import splatWgsl from '@assets/shaders/splat.wgsl?raw'
 import splatSortWgsl from '@assets/shaders/splat-sort.wgsl?raw'
+import blitWgsl from '@assets/shaders/blit.wgsl?raw'
 import defaultScript from '@scripts/scene-script.js?raw'
 import logoJpg from '@assets/logo/drishyam3d_logo.jpg'
 import { setupSettings } from '@engine/settings.js'
@@ -68,6 +69,10 @@ function normalizeText(value) {
   return String(value).replace(/\r\n/g, '\n')
 }
 
+function formatCount(n) {
+  return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : n.toString()
+}
+
 function StatsOverlay({ stats }) {
   if (!stats) return null
   return (
@@ -87,8 +92,8 @@ function StatsOverlay({ stats }) {
     }}>
       <div>{stats.fps} fps ({stats.frameMs}ms)</div>
       <div>{stats.drawableKind}</div>
-      {stats.triangleCount > 0 && <div>{(stats.triangleCount/1000).toFixed(1)}k tris</div>}
-      {stats.splatCount > 0 && <div>{(stats.splatCount/1000).toFixed(1)}k splats</div>}
+      {stats.triangleCount > 0 && <div>{formatCount(stats.triangleCount)} tris</div>}
+      {stats.splatCount > 0 && <div>{formatCount(stats.splatCount)} splats</div>}
     </div>
   )
 }
@@ -148,6 +153,7 @@ export default function App(){
   const [splatLoaded, setSplatLoaded] = useState(false)
   const [splatDebug, setSplatDebug] = useState('off') // 'off' | 'points'
   const [shDegree, setShDegree] = useState(3) // max SH degree used for splat shading
+  const [splatRenderMode, setSplatRenderMode] = useState('instanced') // 'instanced' | 'tile'
   const [showStats, setShowStats] = useState(false)
   const [stats, setStats] = useState(null)
   const [engineReady, setEngineReady] = useState(0)
@@ -168,6 +174,7 @@ export default function App(){
             wgsl: fileContents[defaultWgslPath] ?? defaultWgsl,
             splatWgsl,
             splatSortWgsl,
+            blitWgsl,
           }
         : { vertex: fileContents[defaultVertPath], fragment: fileContents[defaultFragPath] }
 
@@ -223,6 +230,7 @@ export default function App(){
     setSplatLoaded(false)
     setSplatDebug('off')
     setShDegree(3)
+    setSplatRenderMode('instanced')
   }, [backend])
 
   // Apply the splat debug mode to the active engine.
@@ -242,6 +250,15 @@ export default function App(){
       engine.setSplatShDegree(shDegree)
     }
   }, [engineReady, shDegree, splatLoaded])
+
+  // Apply the splat render mode to the active engine.
+  useEffect(() => {
+    if (!engineReady) return
+    const engine = engineRef.current
+    if (engine && typeof engine.setSplatRenderMode === 'function') {
+      engine.setSplatRenderMode(splatRenderMode)
+    }
+  }, [engineReady, splatRenderMode, splatLoaded])
 
   // Poll stats when visible.
   useEffect(() => {
@@ -776,6 +793,10 @@ export default function App(){
               <a href="#" style={backend === 'webgpu' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setBackend('webgpu') }}>WebGPU</a>
               {splatLoaded && (
                 <>
+                  <div className="menu-separator"></div>
+                  <div className="menu-label" style={{padding:'4px 12px',opacity:0.6,fontSize:'0.8em',userSelect:'none'}}>Splat Renderer</div>
+                  <a href="#" style={splatRenderMode === 'instanced' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setSplatRenderMode('instanced') }}>Instanced</a>
+                  <a href="#" style={splatRenderMode === 'tile' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setSplatRenderMode('tile') }}>Tile</a>
                   <div className="menu-separator"></div>
                   <div className="menu-label" style={{padding:'4px 12px',opacity:0.6,fontSize:'0.8em',userSelect:'none'}}>Splat Debug</div>
                   <a href="#" style={splatDebug === 'off' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setSplatDebug('off') }}>Off</a>
