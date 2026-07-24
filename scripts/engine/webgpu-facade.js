@@ -159,6 +159,7 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
             shDegree,
             count: parsed.count,
             bounds: parsed.bounds,
+            positions: parsed.positions, // world-space centers, for the Culled reduction's grid
             _debug: { name: 'splat cloud' },
         };
         scene.loadGeometry(drawable);
@@ -179,6 +180,11 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
         scene.setSplatRenderMode(mode);
     }
 
+    /** Set the ordering reduction axis: 'none' or 'culled'. */
+    function setSplatReduction(mode) {
+        scene.setSplatReduction(mode);
+    }
+
     if (!shaderSources?.wgsl) {
         errorHandler(new Error('Missing WGSL shader source.'));
         return null;
@@ -186,7 +192,7 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
 
     setShaders(shaderSources.wgsl);
     if (shaderSources.splatWgsl && shaderSources.splatSortWgsl) {
-        scene.setSplatShaders(shaderSources.splatWgsl, shaderSources.splatSortWgsl);
+        scene.setSplatShaders(shaderSources.splatWgsl, shaderSources.splatSortWgsl, shaderSources.splatCullWgsl);
     }
     if (shaderSources.blitWgsl && shaderSources.tileRenderWgsl) {
         scene.setTileShaders(shaderSources.blitWgsl, shaderSources.tileRenderWgsl);
@@ -197,7 +203,7 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
     return {
         device, scene, camera,
         setShaders, setScriptSource,
-        loadSplats, setSplatDebugMode, setSplatShDegree, setSplatRenderMode,
+        loadSplats, setSplatDebugMode, setSplatShDegree, setSplatRenderMode, setSplatReduction,
         getStats: () => scene.getStats(),
         destroy: () => scene.destroy(),
     };

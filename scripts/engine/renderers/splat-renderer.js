@@ -20,6 +20,7 @@ import {
 } from '../splat-helpers.js';
 import { BitonicSortBackend } from '../ordering/bitonic-backend.js';
 import { NoneReduction } from '../ordering/none-reduction.js';
+import { CulledReduction } from '../ordering/culled-reduction.js';
 
 // proj(64) + view(64) + viewport(8) + shStride(4) + pad(4) + camPos(12) + shDegree(4).
 // camPos lands at byte 144, 16-byte aligned as WGSL requires for vec3.
@@ -42,10 +43,13 @@ export class SplatRenderer extends Renderer {
         // Upper bound on SH degree, for A/B-ing view-dependent colour in the UI.
         this.maxShDegree = 3;
 
-        // Pluggable ordering (see docs/splat-ordering.md). Milestone A: fixed to
-        // None + Bitonic — the exact baseline. Later milestones make these swappable.
+        // Pluggable ordering (see docs/splat-ordering.md). Sort axis is fixed to
+        // Bitonic for now; the reduction axis swaps between None (passthrough) and
+        // Culled (frustum cull) via setReduction().
         this.sortBackend = new BitonicSortBackend(device);
-        this.reduction = new NoneReduction(device);
+        this.noneReduction = new NoneReduction(device);
+        this.culledReduction = new CulledReduction(device);
+        this.reduction = this.noneReduction;
 
         this.renderBindGroup = null;
         this.debugBindGroup = null;
@@ -54,17 +58,25 @@ export class SplatRenderer extends Renderer {
     init() {
         this.renderParamsBuffer = createUniformBuffer(this.device, RENDER_PARAMS_SIZE);
         this.sortBackend.init();
+        this.noneReduction.init();
+        this.culledReduction.init();
     }
 
-    /** Build the render + debug pipelines and hand the sort WGSL to the backend. */
-    setShaders(splatWgsl, sortWgsl) {
+    /** Build the render + debug pipelines; hand the sort + cull WGSL to the backends. */
+    setShaders(splatWgsl, sortWgsl, cullWgsl) {
         this.renderPipeline = createSplatRenderPipeline(this.device, splatWgsl, this.format);
         this.debugPipeline = createSplatDebugPipeline(this.device, splatWgsl, this.format);
         this.sortBackend.setShaders(sortWgsl);
+        if (cullWgsl) this.culledReduction.setShaders(cullWgsl);
     }
 
     setDebugMode(mode) {
         this.debugMode = mode === 'points' ? 'points' : 'off';
+    }
+
+    /** Select the reduction axis: 'none' (passthrough) or 'culled' (frustum cull). */
+    setReduction(mode) {
+        this.reduction = mode === 'culled' ? this.culledReduction : this.noneReduction;
     }
 
     /** Clamp the SH degree used for shading (0 = flat DC colour). */
@@ -142,15 +154,19 @@ export class SplatRenderer extends Renderer {
 
         if (!this.renderBindGroup) return;
 
-        // Reduce the splat set, then sort it back-to-front (see docs/splat-ordering.md).
-        this.reduction.run(frame, drawable);
-        this.sortBackend.run(frame, drawable);
+        // Sort back-to-front; the active reduction may mask culled keys mid-sort and
+        // return indirect draw args (see docs/splat-ordering.md).
+        const sortResult = this.sortBackend.run(frame, drawable, this.reduction);
 
         // --- Blend pass (instanced billboards, back-to-front) ---
         const pass = encoder.beginRenderPass({ colorAttachments: [colorAttachment] });
         pass.setPipeline(this.renderPipeline);
         pass.setBindGroup(0, this.renderBindGroup);
-        pass.draw(4, drawable.count); // 4-vertex strip per splat instance
+        if (sortResult?.indirect) {
+            pass.drawIndirect(sortResult.indirect, 0); // only the visible instance count
+        } else {
+            pass.draw(4, drawable.count); // 4-vertex strip per splat instance
+        }
         pass.end();
     }
 
@@ -159,14 +175,16 @@ export class SplatRenderer extends Renderer {
         if (drawable?.storageBuffer?.destroy) drawable.storageBuffer.destroy();
         if (drawable?.shBuffer?.destroy) drawable.shBuffer.destroy();
         this.sortBackend.releaseDrawable(drawable);
-        this.reduction.releaseDrawable(drawable);
+        this.noneReduction.releaseDrawable(drawable);
+        this.culledReduction.releaseDrawable(drawable);
         this.renderBindGroup = null;
         this.debugBindGroup = null;
     }
 
     destroy() {
         this.sortBackend.destroy();
-        this.reduction.destroy();
+        this.noneReduction.destroy();
+        this.culledReduction.destroy();
         this.renderParamsBuffer?.destroy?.();
     }
 }

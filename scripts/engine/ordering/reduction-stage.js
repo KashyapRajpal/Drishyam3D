@@ -18,16 +18,24 @@ export class ReductionStage {
         throw new Error('ReductionStage.name not implemented');
     }
 
+    /** Compile any compute pipelines this reduction needs. */
+    setShaders(_wgsl) {}
+
+    /** Create device-lifetime resources (uniform buffers). */
+    init() {}
+
     /** Build per-scene structures (grid/octree/hierarchy) at load. */
     prepare(_drawable) {}
 
     /**
-     * Record reduction compute passes into frame.encoder.
-     * @returns {{ indexBuffer: GPUBuffer|null, count: number }}
-     *   indexBuffer null ⇒ passthrough (sort seeds its own identity indices).
+     * Sort hook, invoked by the SortBackend after compute_keys and before the
+     * sort steps. A reduction may mask sort keys (e.g. sink culled splats) and
+     * return an indirect draw-args buffer so the renderer draws only the reduced
+     * set. The base is a no-op (passthrough) — None keeps the sort byte-identical.
+     * @returns {GPUBuffer|null} indirect draw-args buffer, or null for passthrough
      */
-    run(_frame, _drawable) {
-        return { indexBuffer: null, count: _drawable?.count ?? 0 };
+    maskKeys(_frame, _ctx) {
+        return null;
     }
 
     /** Free per-drawable resources. */

@@ -11,5 +11,6 @@ import { ReductionStage } from './reduction-stage.js';
 
 export class NoneReduction extends ReductionStage {
     get name() { return 'none'; }
-    // Inherits the passthrough run(): { indexBuffer: null, count }.
+    // Inherits the base no-op maskKeys() (returns null) → the sort runs untouched
+    // and the renderer draws all splats.
 }

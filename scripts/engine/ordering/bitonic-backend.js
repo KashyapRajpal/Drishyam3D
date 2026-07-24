@@ -98,11 +98,16 @@ export class BitonicSortBackend extends SortBackend {
         };
     }
 
-    /** Records compute_keys + bitonic_step. Returns { indexBuffer, count }. */
-    run(frame, drawable) {
+    /**
+     * Records compute_keys, then the reduction's key-mask hook (optional), then
+     * the bitonic_step passes. A reduction (e.g. Culled) that masks keys returns
+     * an indirect draw-args buffer so the renderer draws only the reduced set.
+     * @returns {{ indexBuffer: GPUBuffer, count: number, indirect: GPUBuffer|null }}
+     */
+    run(frame, drawable, reduction) {
         const { device, encoder, viewMatrix } = frame;
         if (!this.sortPipelines || !this.sort || !this.bindGroups || !drawable.count) {
-            return { indexBuffer: this.indexBuffer, count: drawable.count };
+            return { indexBuffer: this.indexBuffer, count: drawable.count, indirect: null };
         }
 
         const { paddedCount } = this.sort;
@@ -116,19 +121,38 @@ export class BitonicSortBackend extends SortBackend {
         ku[17] = paddedCount;
         device.queue.writeBuffer(this.keysParamsBuffer, 0, this.keysParamsData);
 
-        const compute = encoder.beginComputePass();
-        compute.setPipeline(this.sortPipelines.keys);
-        compute.setBindGroup(0, this.bindGroups.keys);
-        compute.dispatchWorkgroups(workgroups);
-
-        compute.setPipeline(this.sortPipelines.step);
-        for (const stepGroup of this.bindGroups.steps) {
-            compute.setBindGroup(0, stepGroup);
-            compute.dispatchWorkgroups(workgroups);
+        // Pass 1: depth keys + identity indices.
+        {
+            const pass = encoder.beginComputePass();
+            pass.setPipeline(this.sortPipelines.keys);
+            pass.setBindGroup(0, this.bindGroups.keys);
+            pass.dispatchWorkgroups(workgroups);
+            pass.end();
         }
-        compute.end();
 
-        return { indexBuffer: this.sort.indexBuffer, count: drawable.count };
+        // Reduction hook: mask culled keys, count visible instances. Runs between
+        // keys and steps so the sort then sinks culled splats past the visible set.
+        let indirect = null;
+        if (reduction && typeof reduction.maskKeys === 'function') {
+            indirect = reduction.maskKeys(frame, {
+                keyBuffer: this.sort.keyBuffer,
+                splatBuffer: drawable.storageBuffer,
+                count: drawable.count,
+            });
+        }
+
+        // Pass 2: bitonic compare-exchange stages.
+        {
+            const pass = encoder.beginComputePass();
+            pass.setPipeline(this.sortPipelines.step);
+            for (const stepGroup of this.bindGroups.steps) {
+                pass.setBindGroup(0, stepGroup);
+                pass.dispatchWorkgroups(workgroups);
+            }
+            pass.end();
+        }
+
+        return { indexBuffer: this.sort.indexBuffer, count: drawable.count, indirect };
     }
 
     _release() {

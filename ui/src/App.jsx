@@ -15,6 +15,7 @@ import splatWgsl from '@assets/shaders/splat.wgsl?raw'
 import splatSortWgsl from '@assets/shaders/splat-sort.wgsl?raw'
 import blitWgsl from '@assets/shaders/blit.wgsl?raw'
 import tileRenderWgsl from '@assets/shaders/splat-tile-render.wgsl?raw'
+import splatCullWgsl from '@assets/shaders/splat-cull.wgsl?raw'
 import defaultScript from '@scripts/scene-script.js?raw'
 import logoJpg from '@assets/logo/drishyam3d_logo.jpg'
 import { setupSettings } from '@engine/settings.js'
@@ -179,6 +180,7 @@ export default function App(){
             splatSortWgsl,
             blitWgsl,
             tileRenderWgsl,
+            splatCullWgsl,
           }
         : { vertex: fileContents[defaultVertPath], fragment: fileContents[defaultFragPath] }
 
@@ -265,6 +267,15 @@ export default function App(){
       engine.setSplatRenderMode(splatRenderMode)
     }
   }, [engineReady, splatRenderMode, splatLoaded])
+
+  // Apply the ordering reduction axis to the active engine.
+  useEffect(() => {
+    if (!engineReady) return
+    const engine = engineRef.current
+    if (engine && typeof engine.setSplatReduction === 'function') {
+      engine.setSplatReduction(splatReduction)
+    }
+  }, [engineReady, splatReduction, splatLoaded])
 
   // Poll stats when visible.
   useEffect(() => {
@@ -808,7 +819,7 @@ export default function App(){
                     ] },
                     { axis: 'Reduction', value: splatReduction, set: setSplatReduction, opts: [
                         { k: 'none', l: 'None' },
-                        { k: 'culled', l: 'Culled', soon: true },
+                        { k: 'culled', l: 'Culled' },
                         { k: 'coarse', l: 'Coarse', soon: true },
                         { k: 'lod', l: 'LOD', soon: true },
                     ] },

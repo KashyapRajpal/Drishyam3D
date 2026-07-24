@@ -201,9 +201,15 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
             forceUpdate({ reinitScript: false });
         },
 
-        setSplatShaders(splatWgsl, sortWgsl) {
+        setSplatShaders(splatWgsl, sortWgsl, cullWgsl) {
             if (!splatWgsl || !sortWgsl) return;
-            splatRenderer.setShaders(splatWgsl, sortWgsl);
+            splatRenderer.setShaders(splatWgsl, sortWgsl, cullWgsl);
+            if (drawable?.kind === 'splat') splatRenderer.prepare(drawable);
+            forceUpdate();
+        },
+
+        setSplatReduction(mode) {
+            splatRenderer.setReduction(mode);
             if (drawable?.kind === 'splat') splatRenderer.prepare(drawable);
             forceUpdate();
         },
