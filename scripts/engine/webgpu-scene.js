@@ -208,9 +208,9 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
             forceUpdate();
         },
 
-        setBlitShader(blitWgsl) {
-            if (!blitWgsl) return;
-            splatTileRenderer.setShaders(blitWgsl);
+        setTileShaders(blitWgsl, tileRenderWgsl) {
+            if (!blitWgsl || !tileRenderWgsl) return;
+            splatTileRenderer.setShaders(blitWgsl, tileRenderWgsl);
             if (drawable?.kind === 'splat' && activeSplatRenderer === splatTileRenderer) {
                 splatTileRenderer.prepare(drawable);
             }

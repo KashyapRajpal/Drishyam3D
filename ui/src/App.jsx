@@ -14,6 +14,7 @@ import defaultWgsl from '@assets/shaders/default.wgsl?raw'
 import splatWgsl from '@assets/shaders/splat.wgsl?raw'
 import splatSortWgsl from '@assets/shaders/splat-sort.wgsl?raw'
 import blitWgsl from '@assets/shaders/blit.wgsl?raw'
+import tileRenderWgsl from '@assets/shaders/splat-tile-render.wgsl?raw'
 import defaultScript from '@scripts/scene-script.js?raw'
 import logoJpg from '@assets/logo/drishyam3d_logo.jpg'
 import { setupSettings } from '@engine/settings.js'
@@ -175,6 +176,7 @@ export default function App(){
             splatWgsl,
             splatSortWgsl,
             blitWgsl,
+            tileRenderWgsl,
           }
         : { vertex: fileContents[defaultVertPath], fragment: fileContents[defaultFragPath] }
 

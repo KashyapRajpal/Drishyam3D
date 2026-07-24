@@ -174,6 +174,11 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
         scene.setSplatShDegree(degree);
     }
 
+    /** Set the splat render mode: 'instanced' or 'tile'. */
+    function setSplatRenderMode(mode) {
+        scene.setSplatRenderMode(mode);
+    }
+
     if (!shaderSources?.wgsl) {
         errorHandler(new Error('Missing WGSL shader source.'));
         return null;
@@ -183,13 +188,16 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
     if (shaderSources.splatWgsl && shaderSources.splatSortWgsl) {
         scene.setSplatShaders(shaderSources.splatWgsl, shaderSources.splatSortWgsl);
     }
+    if (shaderSources.blitWgsl && shaderSources.tileRenderWgsl) {
+        scene.setTileShaders(shaderSources.blitWgsl, shaderSources.tileRenderWgsl);
+    }
     setScriptSource(scriptSource);
     scene.start();
 
     return {
         device, scene, camera,
         setShaders, setScriptSource,
-        loadSplats, setSplatDebugMode, setSplatShDegree,
+        loadSplats, setSplatDebugMode, setSplatShDegree, setSplatRenderMode,
         getStats: () => scene.getStats(),
         destroy: () => scene.destroy(),
     };
