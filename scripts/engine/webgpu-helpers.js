@@ -26,7 +26,10 @@ export async function initWebGPU(canvas) {
         throw new Error('No WebGPU adapter found.');
     }
 
-    const device = await adapter.requestDevice();
+    // Opt into timestamp queries for per-pass GPU timing when the adapter supports it.
+    const requiredFeatures = [];
+    if (adapter.features.has('timestamp-query')) requiredFeatures.push('timestamp-query');
+    const device = await adapter.requestDevice({ requiredFeatures });
     const context = canvas.getContext('webgpu');
     const format = navigator.gpu.getPreferredCanvasFormat();
 

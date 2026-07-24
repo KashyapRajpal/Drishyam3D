@@ -14,6 +14,7 @@ import { createIdentityMatrix, createPerspectiveMatrix } from './matrix.js';
 import { MeshRenderer } from './renderers/mesh-renderer.js';
 import { SplatRenderer } from './renderers/splat-renderer.js';
 import { SplatTileRenderer } from './renderers/splat-tile-renderer.js';
+import { GpuTimer } from './gpu-timer.js';
 
 export function createWebGPUScene(device, context, format, canvas, camera) {
     let drawable = null;
@@ -22,17 +23,9 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
     let fpsAccum = 0, fpsCount = 0, displayFps = 0, displayMs = 0;
     let rafPending = false; // Guard against rAF loop accumulation
 
-    // Real frame-time measurement via GPU timestamps or CPU fallback.
+    // Real frame-time measurement (CPU) + per-pass GPU timing (timestamp queries).
     let lastFrameTime = 0;
-    const supportsTimestamps = device.features?.has?.('timestamp-query') ?? false;
-    let querySet = null, resolveBuffer = null;
-    if (supportsTimestamps) {
-        querySet = device.createQuerySet({ type: 'timestamp', count: 2 });
-        resolveBuffer = device.createBuffer({
-            size: 16, // 2 × u64
-            usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-        });
-    }
+    const gpuTimer = new GpuTimer(device);
 
     let userScript = { init: () => {}, update: () => {} };
     const sceneState = { modelRotation: 0.0, modelViewMatrix: null };
@@ -107,6 +100,7 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
 
     function _renderFrame(now) {
         const frameStartTime = performance.now();
+        gpuTimer.beginFrame();
         now *= 0.001;
         const deltaTime = now - then;
         then = now;
@@ -160,11 +154,14 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
             height,
             deltaTime,
             sceneState,
+            gpuTimer,
         };
 
         renderer.record(frame, current);
 
+        gpuTimer.resolve(encoder);
         device.queue.submit([encoder.finish()]);
+        gpuTimer.readback(); // async; not awaited (single-flight)
 
         // Measure actual frame time.
         const frameEndTime = performance.now();
@@ -253,6 +250,7 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
                 reductionMode: info?.mode ?? 'none',
                 // Splats actually drawn after reduction (== total when not culling).
                 visibleSplats: (info && info.visible >= 0) ? info.visible : total,
+                passMs: gpuTimer.getDurations(), // { sort?, reduce? } in ms, GPU timestamp based
             };
         },
 
@@ -262,6 +260,7 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
             meshRenderer.destroy();
             splatRenderer.destroy();
             splatTileRenderer.destroy();
+            gpuTimer.destroy();
             drawable = null;
         },
     };

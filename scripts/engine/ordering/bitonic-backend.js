@@ -141,9 +141,10 @@ export class BitonicSortBackend extends SortBackend {
             });
         }
 
-        // Pass 2: bitonic compare-exchange stages.
+        // Pass 2: bitonic compare-exchange stages (timed as 'sort').
         {
-            const pass = encoder.beginComputePass();
+            const ts = frame.gpuTimer?.span('sort');
+            const pass = encoder.beginComputePass(ts ? { timestampWrites: ts } : {});
             pass.setPipeline(this.sortPipelines.step);
             for (const stepGroup of this.bindGroups.steps) {
                 pass.setBindGroup(0, stepGroup);

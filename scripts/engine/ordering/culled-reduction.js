@@ -143,7 +143,8 @@ export class CulledReduction extends ReductionStage {
             this._keyBuffer = keyBuffer;
         }
 
-        const pass = encoder.beginComputePass();
+        const ts = frame.gpuTimer?.span('reduce');
+        const pass = encoder.beginComputePass(ts ? { timestampWrites: ts } : {});
         pass.setPipeline(this.cullPipeline);
         pass.setBindGroup(0, this.cullBindGroup);
         pass.dispatchWorkgroups(Math.ceil(this.grid.cellCount / CULL_WORKGROUP));

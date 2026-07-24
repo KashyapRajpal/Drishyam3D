@@ -101,6 +101,8 @@ function StatsOverlay({ stats }) {
           {formatCount(stats.visibleSplats)} vis · {Math.round((1 - stats.visibleSplats / stats.splatCount) * 100)}% culled
         </div>
       )}
+      {stats.passMs?.reduce != null && <div style={{ color: '#fc6' }}>reduce {stats.passMs.reduce.toFixed(2)}ms</div>}
+      {stats.passMs?.sort != null && <div style={{ color: '#fc6' }}>sort {stats.passMs.sort.toFixed(2)}ms</div>}
     </div>
   )
 }
