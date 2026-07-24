@@ -230,9 +230,9 @@ Stats overlay: … + "sort: X.X ms"
 
 | Milestone | Delivers | Cells live | Risk |
 |---|---|---|---|
-| **A** | `ReductionStage`/`SortBackend` interfaces + `None` + `Bitonic` (refactor current) + matrix UI + ms timing | None×Bitonic | low — pure refactor, must match today |
-| **B** | `Culled` — grid **and** octree prototypes, keep winner; indirect draw | + Culled×Bitonic | med — new build helpers + cull pass |
-| **C** | `Radix` — reuse tile radix shader | + ×Radix column | med — shared with tile step 4 |
+| **A** ✅ | `ReductionStage`/`SortBackend` interfaces + `None` + `Bitonic` (refactor current) + matrix UI | None×Bitonic | low — pure refactor, must match today |
+| **B** ✅ | `Culled` frustum cull + indirect draw + GPU-timestamp reduce/sort timing; octree built + measured → **grid wins** (see Resolved decision 4) | + Culled×Bitonic | done — grid cull ~0.066 ms, exact |
+| **C** | `Radix` — reuse tile radix shader (the real target: sort ~0.92 ms dominates) | + ×Radix column | med — shared with tile step 4 |
 | **D** | `Coarse` + vs-oracle quality readout | + Coarse×* | med — approximate; popping to tune |
 | **E** | `LOD` — merged-Gaussian hierarchy | + LOD×* | high — own track, weeks |
 
@@ -276,10 +276,17 @@ instead of the inline sort), [splat-tile-renderer.js](../scripts/engine/renderer
    measure cull-throughput; keep the winner. The grid also backs `Coarse`.
 3. **Culled count: indirect draw** — cull writes instance count to an indirect-args buffer consumed
    on-GPU; no per-frame readback stall.
+4. **Culled structure winner: the uniform grid** (measured, milestone B). With the B4 GPU timer on
+   the 85k plant, the grid cull runs in **~0.066 ms** — negligible against the **~0.92 ms** bitonic
+   sort — and is visually exact (verified: None vs Culled pixel-identical at 17% and 59% culled, no
+   edge artifacts). The octree's only edge is *tighter* culling, which can shave at most a fraction
+   of an already-free 0.066 ms while the sort dominates 14×. So the **GPU octree cull is not built**:
+   the octree is kept as a tested build-time module ([spatial/octree.js](../scripts/engine/ordering/spatial/octree.js))
+   ready for a future scene large/clustered enough to matter, and the real optimization target moves
+   to the **sort** (radix, milestone C). The reduction axis exposes only `None` and `Culled`.
 
 ### Still open (deferred to their milestone)
 
-- **Exact grid-vs-octree winner** — decided empirically in milestone B, not now.
 - **Matrix widget** — inline dropdown rows vs dedicated popover panel — a milestone-A UI detail.
 - **Key-hint width `k`** for `Coarse` — how many high bits the cell rank claims — tuned in D against
   the popping readout.
