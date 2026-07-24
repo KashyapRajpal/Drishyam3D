@@ -25,3 +25,9 @@ assets/3dgs/
 
 # Local glTF model test data (large .bin / 4K textures)
 assets/gltf/
+
+# Visual-regression harness: golden images, run output, and machine-local config
+# stay local (test assets are unlicensed and must not be pushed to GitHub).
+visual/golden/
+visual/output/
+visual/local.config.json
