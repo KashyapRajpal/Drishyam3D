@@ -155,6 +155,8 @@ export default function App(){
   const [splatDebug, setSplatDebug] = useState('off') // 'off' | 'points'
   const [shDegree, setShDegree] = useState(3) // max SH degree used for splat shading
   const [splatRenderMode, setSplatRenderMode] = useState('instanced') // 'instanced' | 'tile'
+  const [splatSort, setSplatSort] = useState('bitonic') // ordering matrix — sort axis
+  const [splatReduction, setSplatReduction] = useState('none') // ordering matrix — reduction axis
   const [showStats, setShowStats] = useState(false)
   const [stats, setStats] = useState(null)
   const [engineReady, setEngineReady] = useState(0)
@@ -233,6 +235,8 @@ export default function App(){
     setSplatDebug('off')
     setShDegree(3)
     setSplatRenderMode('instanced')
+    setSplatSort('bitonic')
+    setSplatReduction('none')
   }, [backend])
 
   // Apply the splat debug mode to the active engine.
@@ -796,9 +800,39 @@ export default function App(){
               {splatLoaded && (
                 <>
                   <div className="menu-separator"></div>
-                  <div className="menu-label" style={{padding:'4px 12px',opacity:0.6,fontSize:'0.8em',userSelect:'none'}}>Splat Renderer</div>
-                  <a href="#" style={splatRenderMode === 'instanced' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setSplatRenderMode('instanced') }}>Instanced</a>
-                  <a href="#" style={splatRenderMode === 'tile' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setSplatRenderMode('tile') }}>Tile</a>
+                  <div className="menu-label" style={{padding:'4px 12px',opacity:0.6,fontSize:'0.8em',userSelect:'none'}}>Splat Ordering</div>
+                  {[
+                    { axis: 'Sort', value: splatSort, set: setSplatSort, opts: [
+                        { k: 'bitonic', l: 'Bitonic' },
+                        { k: 'radix', l: 'Radix', soon: true },
+                    ] },
+                    { axis: 'Reduction', value: splatReduction, set: setSplatReduction, opts: [
+                        { k: 'none', l: 'None' },
+                        { k: 'culled', l: 'Culled', soon: true },
+                        { k: 'coarse', l: 'Coarse', soon: true },
+                        { k: 'lod', l: 'LOD', soon: true },
+                    ] },
+                    { axis: 'Render', value: splatRenderMode, set: setSplatRenderMode, opts: [
+                        { k: 'instanced', l: 'Instanced' },
+                        { k: 'tile', l: 'Tile' },
+                    ] },
+                  ].map((row) => (
+                    <div key={row.axis} style={{display:'flex',alignItems:'center',gap:8,padding:'2px 12px'}}>
+                      <span style={{width:70,flexShrink:0,fontSize:'0.78em',opacity:0.6,userSelect:'none'}}>{row.axis}</span>
+                      <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+                        {row.opts.map((o) => o.soon ? (
+                          <span key={o.k} title="Coming soon" style={{display:'inline-block',padding:'1px 6px',fontSize:'0.85em',opacity:0.35,cursor:'default'}}>{o.l}</span>
+                        ) : (
+                          <a
+                            key={o.k}
+                            href="#"
+                            style={{display:'inline-block',padding:'1px 6px',fontSize:'0.85em',borderRadius:3,fontWeight: row.value===o.k?'bold':'normal',background: row.value===o.k?'rgba(120,160,255,0.18)':'transparent'}}
+                            onClick={(e) => { e.preventDefault(); row.set(o.k) }}
+                          >{o.l}</a>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                   <div className="menu-separator"></div>
                   <div className="menu-label" style={{padding:'4px 12px',opacity:0.6,fontSize:'0.8em',userSelect:'none'}}>Splat Debug</div>
                   <a href="#" style={splatDebug === 'off' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setSplatDebug('off') }}>Off</a>
