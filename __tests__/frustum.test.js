@@ -1,4 +1,5 @@
-import { extractFrustumPlanes, viewProjection, aabbInFrustum } from '../scripts/engine/ordering/spatial/frustum.js';
+import { extractFrustumPlanes, viewProjection, aabbInFrustum, cellVisibility } from '../scripts/engine/ordering/spatial/frustum.js';
+import { buildGrid } from '../scripts/engine/ordering/spatial/grid.js';
 import { createPerspectiveMatrix, createLookAtMatrix } from '../scripts/engine/matrix.js';
 
 // Camera at (0,0,5) looking at the origin down -z; 45° fov, aspect 1, near 0.1, far 100.
@@ -57,5 +58,43 @@ describe('aabbInFrustum — visibility against a known camera', () => {
 
   test('a huge box enclosing the frustum is kept (conservative)', () => {
     expect(aabbInFrustum(planes, [-1000, -1000, -1000], [1000, 1000, 1000])).toBe(true);
+  });
+});
+
+describe('cellVisibility — CPU twin of the cull_cells pass', () => {
+  // Splats spread far along ±x so distant cells fall outside the camera's fov.
+  function scene() {
+    const count = 400;
+    const positions = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      positions[i * 3] = (i / (count - 1)) * 100 - 50; // x from -50..50
+      positions[i * 3 + 1] = 0;
+      positions[i * 3 + 2] = 0;
+    }
+    return { positions, count };
+  }
+  function cellIndexOf(grid, x, y, z) {
+    const q = (p, mn, cs, dim) => Math.min(dim - 1, Math.max(0, Math.floor((p - mn) / cs)));
+    const cx = q(x, grid.min[0], grid.cellSize[0], grid.dim);
+    const cy = q(y, grid.min[1], grid.cellSize[1], grid.dim);
+    const cz = q(z, grid.min[2], grid.cellSize[2], grid.dim);
+    return (cz * grid.dim + cy) * grid.dim + cx;
+  }
+
+  test('culls distant cells but keeps the ones the camera looks at', () => {
+    const { positions, count } = scene();
+    const grid = buildGrid(positions, count, { dim: 8 });
+    const planes = extractFrustumPlanes(cameraVP());
+    const vis = cellVisibility(grid, planes);
+
+    let visibleCells = 0;
+    for (const v of vis) visibleCells += v;
+    // Non-trivial: some cells visible, some culled.
+    expect(visibleCells).toBeGreaterThan(0);
+    expect(visibleCells).toBeLessThan(grid.cellCount);
+
+    // The origin (dead center of view) is visible; the far +x end is culled.
+    expect(vis[cellIndexOf(grid, 0, 0, 0)]).toBe(1);
+    expect(vis[cellIndexOf(grid, 50, 0, 0)]).toBe(0);
   });
 });

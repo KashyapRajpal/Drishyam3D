@@ -11,6 +11,7 @@
  * to WebGPU's tighter [0, w] hardware clip (it never rejects a visible cell).
  */
 import { multiplyMatrices } from '../../matrix.js';
+import { cellAABB } from './grid.js';
 
 // Row r of a column-major mat4 (element (row, col) lives at col*4 + row).
 function row(m, r) { return [m[r], m[4 + r], m[8 + r], m[12 + r]]; }
@@ -63,4 +64,20 @@ export function aabbInFrustum(planes, min, max) {
         if (a * px + b * py + c * pz + d < 0) return false;
     }
     return true;
+}
+
+/**
+ * Per-cell visibility for a grid against frustum planes — the CPU twin of the
+ * `cull_cells` compute pass (splat-cull.wgsl). Returned as 0/1 per linear cell.
+ * @param {{cellCount:number}} grid from buildGrid
+ * @param {number[][]} planes from extractFrustumPlanes
+ * @returns {Uint8Array} length grid.cellCount
+ */
+export function cellVisibility(grid, planes) {
+    const vis = new Uint8Array(grid.cellCount);
+    for (let c = 0; c < grid.cellCount; c++) {
+        const box = cellAABB(grid, c);
+        vis[c] = aabbInFrustum(planes, box.min, box.max) ? 1 : 0;
+    }
+    return vis;
 }
