@@ -240,13 +240,19 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
         getDrawable,
 
         getStats() {
+            const isSplat = drawable?.kind === 'splat';
+            const info = isSplat ? activeSplatRenderer.getReductionInfo?.() : null;
+            const total = isSplat ? drawable.count : 0;
             return {
                 backend: 'webgpu',
                 fps: displayFps,
                 frameMs: displayMs,
                 drawableKind: drawable?.kind ?? 'none',
                 triangleCount: drawable?.kind === 'mesh' ? drawable.vertexCount / 3 : 0,
-                splatCount: drawable?.kind === 'splat' ? drawable.count : 0,
+                splatCount: total,
+                reductionMode: info?.mode ?? 'none',
+                // Splats actually drawn after reduction (== total when not culling).
+                visibleSplats: (info && info.visible >= 0) ? info.visible : total,
             };
         },
 

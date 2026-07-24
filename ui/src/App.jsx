@@ -96,6 +96,11 @@ function StatsOverlay({ stats }) {
       <div>{stats.drawableKind}</div>
       {stats.triangleCount > 0 && <div>{formatCount(stats.triangleCount)} tris</div>}
       {stats.splatCount > 0 && <div>{formatCount(stats.splatCount)} splats</div>}
+      {stats.splatCount > 0 && stats.reductionMode === 'culled' && (
+        <div style={{ color: '#6cf' }}>
+          {formatCount(stats.visibleSplats)} vis · {Math.round((1 - stats.visibleSplats / stats.splatCount) * 100)}% culled
+        </div>
+      )}
     </div>
   )
 }
@@ -147,7 +152,9 @@ function CodeEditor({ value, onChange, mode, readOnly }) {
 }
 
 export default function App(){
-  const [backend, setBackend] = useState('webgl')
+  // Visual-regression harness loads with ?test=1 and drives WebGPU splats directly.
+  const isVisualTest = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('test')
+  const [backend, setBackend] = useState(isVisualTest ? 'webgpu' : 'webgl')
   const [error, setError] = useState(null)
   const [textured, setTextured] = useState(false)
   const [currentShape, setCurrentShape] = useState('cube')
@@ -200,6 +207,9 @@ export default function App(){
         return
       }
       engineRef.current = engine
+
+      // Expose the engine for the visual-regression harness (?test=1 only).
+      if (isVisualTest) window.__DRISHYAM_ENGINE = engine
 
       setupSettings((k,v)=>{})
       geometryFactoryRef.current = backend === 'webgpu'

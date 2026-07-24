@@ -14,7 +14,7 @@
  */
 import { ReductionStage } from './reduction-stage.js';
 import { buildGrid } from './spatial/grid.js';
-import { extractFrustumPlanes, viewProjection } from './spatial/frustum.js';
+import { extractFrustumPlanes, viewProjection, cellVisibility } from './spatial/frustum.js';
 import { createUniformBuffer } from '../webgpu-helpers.js';
 
 const CULL_PARAMS_SIZE = 144; // planes(96) + gridMin(16) + cellSize(12)+dim(4) + cellCount+splatCount+pad
@@ -37,6 +37,7 @@ export class CulledReduction extends ReductionStage {
         this.cullBindGroup = null;
         this.applyBindGroup = null;
         this._keyBuffer = null; // cached to detect when the apply bind group must rebuild
+        this.lastVisibleCount = -1; // debug: splats surviving the cull last frame (-1 = unknown)
     }
 
     init() {
@@ -95,6 +96,18 @@ export class CulledReduction extends ReductionStage {
         // Upload cull params: 6 frustum planes + grid descriptor.
         const vp = viewProjection(projectionMatrix, viewMatrix);
         const planes = extractFrustumPlanes(vp);
+
+        // Debug: exact visible-splat count, computed CPU-side from the grid using the
+        // same cell-visibility test the GPU runs (sum the populations of visible cells).
+        // Cheap — cellCount (≈4096) plane tests — and matches apply_cull's atomic count.
+        const cellVis = cellVisibility(this.grid, planes);
+        let visible = 0;
+        const cs = this.grid.cellStart;
+        for (let c = 0; c < this.grid.cellCount; c++) {
+            if (cellVis[c]) visible += cs[c + 1] - cs[c];
+        }
+        this.lastVisibleCount = visible;
+
         const f = new Float32Array(this.cullParamsData);
         const u = new Uint32Array(this.cullParamsData);
         for (let i = 0; i < 6; i++) {
@@ -103,9 +116,14 @@ export class CulledReduction extends ReductionStage {
             f[i * 4 + 2] = planes[i][2];
             f[i * 4 + 3] = planes[i][3];
         }
-        f[24] = this.grid.min[0]; f[25] = this.grid.min[1]; f[26] = this.grid.min[2];
-        f[28] = this.grid.cellSize[0]; f[29] = this.grid.cellSize[1]; f[30] = this.grid.cellSize[2];
-        u[32] = this.grid.dim; u[33] = this.grid.cellCount; u[34] = count;
+        // WGSL std140-ish layout: a vec3 has size 12 / align 16, so the scalars
+        // after cellSize pack at byte 124 onward — NOT 128. Offsets are in
+        // 4-byte words: gridMin@24, cellSize@28, dim@31, cellCount@32, splatCount@33.
+        f[24] = this.grid.min[0]; f[25] = this.grid.min[1]; f[26] = this.grid.min[2]; // gridMin  (byte 96)
+        f[28] = this.grid.cellSize[0]; f[29] = this.grid.cellSize[1]; f[30] = this.grid.cellSize[2]; // cellSize (byte 112)
+        u[31] = this.grid.dim;       // byte 124
+        u[32] = this.grid.cellCount; // byte 128
+        u[33] = count;               // byte 132 (splatCount)
         device.queue.writeBuffer(this.cullParamsBuffer, 0, this.cullParamsData);
 
         // Reset indirect args: vertexCount=4, instanceCount=0, first*=0.
@@ -146,6 +164,7 @@ export class CulledReduction extends ReductionStage {
         this.applyBindGroup = null;
         this.grid = null;
         this._keyBuffer = null;
+        this.lastVisibleCount = -1;
     }
 
     releaseDrawable() { this._release(); }

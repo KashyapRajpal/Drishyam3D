@@ -79,6 +79,14 @@ export class SplatRenderer extends Renderer {
         this.reduction = mode === 'culled' ? this.culledReduction : this.noneReduction;
     }
 
+    /** Debug info for the stats overlay: active reduction + last visible-splat count. */
+    getReductionInfo() {
+        return {
+            mode: this.reduction.name,
+            visible: this.reduction.lastVisibleCount ?? -1, // -1 ⇒ not culling (all visible)
+        };
+    }
+
     /** Clamp the SH degree used for shading (0 = flat DC colour). */
     setMaxShDegree(degree) {
         this.maxShDegree = Math.max(0, Math.min(3, degree | 0));
