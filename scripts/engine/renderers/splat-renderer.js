@@ -3,30 +3,27 @@
  * @copyright 2026 Kashyap Rajpal
  * @license MIT
  *
- * Per frame: a compute pass generates view-space depth keys and bitonic-sorts
- * the splat indices back-to-front, then a no-depth premultiplied-blend pass
- * draws instanced billboards. A debug mode draws splat centers as points to
- * validate parsing/projection independently of the blend path.
+ * Draws splats as instanced premultiplied-alpha billboards. Depth ordering is
+ * delegated to a pluggable SortBackend and the splat set to a ReductionStage
+ * (see docs/splat-ordering.md); this renderer owns only the render/debug
+ * pipelines, the render-params buffer, and the blend pass. A debug mode draws
+ * splat centers as points to validate parsing/projection independently.
  *
- * Shared entities (camera, view/projection matrices) arrive via `frame`; this
- * renderer owns only splat-specific GPU resources.
+ * Shared entities (camera, view/projection matrices) arrive via `frame`.
  */
 import { Renderer } from './renderer.js';
 import { createUniformBuffer } from '../webgpu-helpers.js';
 import {
-    createSortBuffers,
     createSplatRenderPipeline,
     createSplatDebugPipeline,
-    createSortPipelines,
     shCoeffCount,
 } from '../splat-helpers.js';
+import { BitonicSortBackend } from '../ordering/bitonic-backend.js';
+import { NoneReduction } from '../ordering/none-reduction.js';
 
-const WORKGROUP_SIZE = 256;
-// proj(64) + view(64) + viewport(8) + pad(8) + camPos(12) + shDegree(4).
-// camPos lands at byte 144, which is 16-byte aligned as WGSL requires for vec3.
+// proj(64) + view(64) + viewport(8) + shStride(4) + pad(4) + camPos(12) + shDegree(4).
+// camPos lands at byte 144, 16-byte aligned as WGSL requires for vec3.
 const RENDER_PARAMS_SIZE = 160;
-const KEYS_PARAMS_SIZE = 80;    // view(64) + count(4) + padded(4) + pad(8)
-const STEP_STRIDE = 256;        // 256B-aligned slice per bitonic stage
 
 export class SplatRenderer extends Renderer {
     get kind() { return 'splat'; }
@@ -35,35 +32,35 @@ export class SplatRenderer extends Renderer {
         super(device, format);
         this.renderPipeline = null;
         this.debugPipeline = null;
-        this.sortPipelines = null; // { keys, step }
 
         this.renderParamsBuffer = null;
-        this.keysParamsBuffer = null;
         this.renderParamsData = new Float32Array(RENDER_PARAMS_SIZE / 4);
-        // Aliased u32 view so shDegree can share the render-params scratch buffer.
+        // Aliased u32 view so shStride/shDegree can share the render-params scratch.
         this.renderParamsU32 = new Uint32Array(this.renderParamsData.buffer);
-        this.keysParamsData = new ArrayBuffer(KEYS_PARAMS_SIZE);
 
         this.debugMode = 'off'; // 'off' | 'points'
         // Upper bound on SH degree, for A/B-ing view-dependent colour in the UI.
-        // Effective degree is min(this, the degree the loaded scene provides).
         this.maxShDegree = 3;
 
-        // Per-scene resources (rebuilt in prepare()).
-        this.sort = null; // { indexBuffer, keyBuffer, paddedCount, stepBuffer, stages }
-        this.bindGroups = null; // { render, debug, keys, steps: [] }
+        // Pluggable ordering (see docs/splat-ordering.md). Milestone A: fixed to
+        // None + Bitonic — the exact baseline. Later milestones make these swappable.
+        this.sortBackend = new BitonicSortBackend(device);
+        this.reduction = new NoneReduction(device);
+
+        this.renderBindGroup = null;
+        this.debugBindGroup = null;
     }
 
     init() {
         this.renderParamsBuffer = createUniformBuffer(this.device, RENDER_PARAMS_SIZE);
-        this.keysParamsBuffer = createUniformBuffer(this.device, KEYS_PARAMS_SIZE);
+        this.sortBackend.init();
     }
 
-    /** Build the splat, debug, and sort pipelines from WGSL sources. */
+    /** Build the render + debug pipelines and hand the sort WGSL to the backend. */
     setShaders(splatWgsl, sortWgsl) {
         this.renderPipeline = createSplatRenderPipeline(this.device, splatWgsl, this.format);
         this.debugPipeline = createSplatDebugPipeline(this.device, splatWgsl, this.format);
-        this.sortPipelines = createSortPipelines(this.device, sortWgsl);
+        this.sortBackend.setShaders(sortWgsl);
     }
 
     setDebugMode(mode) {
@@ -75,89 +72,43 @@ export class SplatRenderer extends Renderer {
         this.maxShDegree = Math.max(0, Math.min(3, degree | 0));
     }
 
-    /** Bitonic stage (k, j) sequence for a power-of-two length. */
-    static _stages(padded) {
-        const stages = [];
-        for (let k = 2; k <= padded; k <<= 1) {
-            for (let j = k >> 1; j > 0; j >>= 1) stages.push({ k, j });
-        }
-        return stages;
-    }
-
     prepare(drawable) {
-        this._releaseSort();
+        this.renderBindGroup = null;
+        this.debugBindGroup = null;
         if (!drawable || drawable.kind !== 'splat' || !drawable.count || !drawable.shBuffer) return;
-        if (!this.renderPipeline || !this.sortPipelines || !this.renderParamsBuffer) return;
+        if (!this.renderPipeline || !this.renderParamsBuffer) return;
+
+        this.reduction.prepare(drawable);
+        this.sortBackend.prepare(drawable);
+        const indexBuffer = this.sortBackend.indexBuffer;
+        if (!indexBuffer) return;
 
         const { device } = this;
-        const { storageBuffer, count } = drawable;
+        const { storageBuffer } = drawable;
 
-        const { indexBuffer, keyBuffer, paddedCount } = createSortBuffers(device, count);
-        const stages = SplatRenderer._stages(paddedCount);
-
-        // Precompute the per-stage (k, j, padded) uniforms — camera-independent.
-        const stepBuffer = createUniformBuffer(device, Math.max(stages.length, 1) * STEP_STRIDE);
-        if (stages.length > 0) {
-            const u32 = new Uint32Array(stages.length * (STEP_STRIDE / 4));
-            stages.forEach((s, i) => {
-                const base = i * (STEP_STRIDE / 4);
-                u32[base + 0] = s.k;
-                u32[base + 1] = s.j;
-                u32[base + 2] = paddedCount;
-            });
-            device.queue.writeBuffer(stepBuffer, 0, u32);
-        }
-
-        this.sort = { indexBuffer, keyBuffer, paddedCount, stepBuffer, stages, storageBuffer };
-
-        // Bind groups (auto layouts differ per pipeline/entry point).
-        const keysLayout = this.sortPipelines.keys.getBindGroupLayout(0);
-        const stepLayout = this.sortPipelines.step.getBindGroupLayout(0);
-
-        const steps = stages.map((_, i) => device.createBindGroup({
-            layout: stepLayout,
+        this.renderBindGroup = device.createBindGroup({
+            layout: this.renderPipeline.getBindGroupLayout(0),
             entries: [
-                { binding: 4, resource: { buffer: stepBuffer, offset: i * STEP_STRIDE, size: 16 } },
-                { binding: 2, resource: { buffer: keyBuffer } },
-                { binding: 3, resource: { buffer: indexBuffer } },
+                { binding: 0, resource: { buffer: this.renderParamsBuffer } },
+                { binding: 1, resource: { buffer: storageBuffer } },
+                { binding: 2, resource: { buffer: indexBuffer } },
+                { binding: 3, resource: { buffer: drawable.shBuffer } },
             ],
-        }));
-
-        this.bindGroups = {
-            keys: device.createBindGroup({
-                layout: keysLayout,
-                entries: [
-                    { binding: 0, resource: { buffer: this.keysParamsBuffer } },
-                    { binding: 1, resource: { buffer: storageBuffer } },
-                    { binding: 2, resource: { buffer: keyBuffer } },
-                    { binding: 3, resource: { buffer: indexBuffer } },
-                ],
-            }),
-            render: device.createBindGroup({
-                layout: this.renderPipeline.getBindGroupLayout(0),
-                entries: [
-                    { binding: 0, resource: { buffer: this.renderParamsBuffer } },
-                    { binding: 1, resource: { buffer: storageBuffer } },
-                    { binding: 2, resource: { buffer: indexBuffer } },
-                    { binding: 3, resource: { buffer: drawable.shBuffer } },
-                ],
-            }),
-            debug: device.createBindGroup({
-                layout: this.debugPipeline.getBindGroupLayout(0),
-                entries: [
-                    { binding: 0, resource: { buffer: this.renderParamsBuffer } },
-                    { binding: 1, resource: { buffer: storageBuffer } },
-                ],
-            }),
-            steps,
-        };
+        });
+        this.debugBindGroup = device.createBindGroup({
+            layout: this.debugPipeline.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: { buffer: this.renderParamsBuffer } },
+                { binding: 1, resource: { buffer: storageBuffer } },
+            ],
+        });
     }
 
     record(frame, drawable) {
         const { device, encoder, targetView, camera, viewMatrix, projectionMatrix, width, height } = frame;
-        if (!this.renderPipeline || !this.sort || !this.bindGroups || !drawable.count) return;
+        if (!this.renderPipeline || !drawable.count) return;
 
-        // Upload render params (proj, view, viewport, camera position, SH degree).
+        // Upload render params (proj, view, viewport, camera position, SH stride/degree).
         this.renderParamsData.set(projectionMatrix, 0);
         this.renderParamsData.set(viewMatrix, 16);
         this.renderParamsData[32] = width;
@@ -180,65 +131,42 @@ export class SplatRenderer extends Renderer {
         };
 
         if (this.debugMode === 'points') {
+            if (!this.debugBindGroup) return;
             const pass = encoder.beginRenderPass({ colorAttachments: [colorAttachment] });
             pass.setPipeline(this.debugPipeline);
-            pass.setBindGroup(0, this.bindGroups.debug);
+            pass.setBindGroup(0, this.debugBindGroup);
             pass.draw(drawable.count); // one point per splat
             pass.end();
             return;
         }
 
-        // --- Depth sort (compute) ---
-        const { paddedCount } = this.sort;
-        const workgroups = Math.ceil(paddedCount / WORKGROUP_SIZE);
+        if (!this.renderBindGroup) return;
 
-        // Keys params: view + count + padded.
-        const kf = new Float32Array(this.keysParamsData);
-        const ku = new Uint32Array(this.keysParamsData);
-        kf.set(viewMatrix, 0);
-        ku[16] = drawable.count;
-        ku[17] = paddedCount;
-        device.queue.writeBuffer(this.keysParamsBuffer, 0, this.keysParamsData);
-
-        const compute = encoder.beginComputePass();
-        compute.setPipeline(this.sortPipelines.keys);
-        compute.setBindGroup(0, this.bindGroups.keys);
-        compute.dispatchWorkgroups(workgroups);
-
-        compute.setPipeline(this.sortPipelines.step);
-        for (const stepGroup of this.bindGroups.steps) {
-            compute.setBindGroup(0, stepGroup);
-            compute.dispatchWorkgroups(workgroups);
-        }
-        compute.end();
+        // Reduce the splat set, then sort it back-to-front (see docs/splat-ordering.md).
+        this.reduction.run(frame, drawable);
+        this.sortBackend.run(frame, drawable);
 
         // --- Blend pass (instanced billboards, back-to-front) ---
         const pass = encoder.beginRenderPass({ colorAttachments: [colorAttachment] });
         pass.setPipeline(this.renderPipeline);
-        pass.setBindGroup(0, this.bindGroups.render);
+        pass.setBindGroup(0, this.renderBindGroup);
         pass.draw(4, drawable.count); // 4-vertex strip per splat instance
         pass.end();
-    }
-
-    _releaseSort() {
-        if (!this.sort) return;
-        this.sort.indexBuffer?.destroy?.();
-        this.sort.keyBuffer?.destroy?.();
-        this.sort.stepBuffer?.destroy?.();
-        this.sort = null;
-        this.bindGroups = null;
     }
 
     releaseDrawable(drawable) {
         // The storage and SH buffers are owned by the drawable (created by the facade).
         if (drawable?.storageBuffer?.destroy) drawable.storageBuffer.destroy();
         if (drawable?.shBuffer?.destroy) drawable.shBuffer.destroy();
-        this._releaseSort();
+        this.sortBackend.releaseDrawable(drawable);
+        this.reduction.releaseDrawable(drawable);
+        this.renderBindGroup = null;
+        this.debugBindGroup = null;
     }
 
     destroy() {
-        this._releaseSort();
+        this.sortBackend.destroy();
+        this.reduction.destroy();
         this.renderParamsBuffer?.destroy?.();
-        this.keysParamsBuffer?.destroy?.();
     }
 }
