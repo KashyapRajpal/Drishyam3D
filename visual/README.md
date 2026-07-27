@@ -12,11 +12,11 @@ and this README are committed.
 ## One-time setup
 
 ```bash
-npm install                      # pulls playwright, pixelmatch, pngjs (devDeps)
+npm install                      # pulls playwright-core, pixelmatch, pngjs (devDeps)
 ```
 
-Uses your installed **Chrome** (`channel: 'chrome'`) for real WebGPU — no separate
-browser download. The test capture is expected at
+Uses `playwright-core` (no bundled-browser download) with your installed **Chrome**
+(`channel: 'chrome'`) for real WebGPU. The test capture is expected at
 `assets/3dgs/source/3DGS.ply TRE.ply`; to point elsewhere, copy
 `visual/local.config.example.json` → `visual/local.config.json` and edit `plyPath`.
 

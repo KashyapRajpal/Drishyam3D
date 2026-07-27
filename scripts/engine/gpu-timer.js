@@ -69,11 +69,14 @@ export class GpuTimer {
         this._pending = true;
         try {
             await this.readBuffer.mapAsync(GPUMapMode.READ);
-            const ticks = new BigInt64Array(this.readBuffer.getMappedRange().slice(0));
+            // Timestamps are u64 nanoseconds — read unsigned so large values aren't
+            // misread as negative. Compare before subtracting to avoid unsigned wrap.
+            const ticks = new BigUint64Array(this.readBuffer.getMappedRange().slice(0));
             this.readBuffer.unmap();
             for (let i = 0; i < names.length; i++) {
-                const ns = Number(ticks[i * 2 + 1] - ticks[i * 2]); // nanoseconds
-                if (ns >= 0) this._durations[names[i]] = ns / 1e6;
+                const begin = ticks[i * 2];
+                const end = ticks[i * 2 + 1];
+                if (end >= begin) this._durations[names[i]] = Number(end - begin) / 1e6;
             }
         } catch (e) {
             /* mapping race / device lost — drop this sample */

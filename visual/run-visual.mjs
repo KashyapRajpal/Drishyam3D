@@ -14,7 +14,7 @@
  * Prereqs: the dev server running (`cd ui && npm run dev`) and Chrome installed.
  * Optional visual/local.config.json overrides the defaults below.
  */
-import { chromium } from 'playwright';
+import { chromium } from 'playwright-core';
 import pixelmatch from 'pixelmatch';
 import { PNG } from 'pngjs';
 import fs from 'node:fs';

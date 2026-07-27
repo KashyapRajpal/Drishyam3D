@@ -33,10 +33,15 @@ export class SortBackend {
     prepare(_drawable) {}
 
     /**
-     * Record the ordering compute passes into frame.encoder.
-     * @returns {{ indexBuffer: GPUBuffer|null, count: number }}
+     * Record the ordering compute passes into frame.encoder. An optional
+     * ReductionStage may hook in mid-sort (e.g. via maskKeys) to reject splats
+     * and return indirect draw args, so the renderer draws only the reduced set.
+     * @param {object} frame per-frame state (device, encoder, matrices, gpuTimer)
+     * @param {object} drawable the splat drawable
+     * @param {import('./reduction-stage.js').ReductionStage} [reduction] active reduction
+     * @returns {{ indexBuffer: GPUBuffer|null, count: number, indirect: GPUBuffer|null }}
      */
-    run(_frame, _drawable) {
+    run(_frame, _drawable, _reduction) {
         throw new Error(`${this.name}: run() not implemented`);
     }
 

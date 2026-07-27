@@ -3,8 +3,11 @@
 Design doc for a **pluggable, matrix-style ordering module** that lets Drishyam3D combine several
 splat-ordering algorithms at runtime and score them head-to-head — a "sort shootout." It captures
 the three-axis architecture, the backends on each axis, the measurement harness, the milestone
-sequencing, and the resolved design decisions. **No code exists for this yet**; this is the plan of
-record.
+sequencing, and the resolved design decisions.
+
+> **Status:** milestones **A** and **B** are implemented (the `SortBackend`/`ReductionStage`
+> modules, `Bitonic` + `None` + `Culled`, the matrix UI, GPU timing). C (radix), D (coarse), and E
+> (LOD) remain planned. See [Milestone sequencing](#milestone-sequencing) for what's live.
 
 Companion to **[splat-rendering.md](splat-rendering.md)**, which documents the *current*
 sort-then-rasterize pipeline. Read that first — this doc assumes its data model (the 64-byte
@@ -76,23 +79,29 @@ flowchart LR
 Two small interfaces, composed by the renderer:
 
 ```js
-// scripts/engine/ordering/  (planned)
+// scripts/engine/ordering/  (A/B as implemented; Coarse key-hints land in D)
 
-class ReductionStage {           // axis 1
-  prepare(drawable) {}           // per-scene setup — build grid/octree/hierarchy at load
-  run(frame, drawable)           // → { indexBuffer, count, keyHints? }  (subset + optional coarse rank)
+class ReductionStage {              // axis 1
+  prepare(drawable) {}              // per-scene setup — build grid/octree at load
+  maskKeys(frame, ctx)              // sort hook: reject culled splats' keys, return
+                                    //   indirect draw args (or null = passthrough)
 }
 
-class SortBackend {              // axis 2
-  run(frame, indexBuffer, count, keyHints?)  // → ordered indexBuffer (back-to-front)
+class SortBackend {                 // axis 2 — owns the index + key buffers
+  prepare(drawable) {}
+  run(frame, drawable, reduction)   // → { indexBuffer, count, indirect }
 }
 ```
 
-- **Reduction** produces a (possibly smaller) index set and, for `Coarse`, optional **key hints**
-  (the high bits from cell rank). `None` is a passthrough (`indices[i]=i`, `count=N`).
-- **Sort** orders that set by depth key, honoring any key hints. `Bitonic` and `Radix` are exact.
-- The renderer (**instanced** or **tiled**) consumes the final ordered index buffer + count exactly
-  as today's `draw(4, count)` reads `indices[iid]`.
+- **Reduction** hooks into the sort via `maskKeys`, which runs *after* the keys are written and
+  *before* the sort steps. `Culled` sinks off-frustum splats' keys past the visible set and returns
+  an **indirect draw-args** buffer so the renderer draws only survivors; `None` is a no-op. (The
+  `Coarse` **key-hint** path — cell rank as the high key bits — is planned for milestone D.)
+- **Sort** owns the index/key buffers; `run()` records `compute_keys` → the reduction's `maskKeys`
+  hook → the sort steps, returning the ordered index buffer + optional indirect args. `Bitonic` is
+  exact; `Radix` (C) will be too.
+- The renderer (**instanced** or **tiled**) draws the ordered index buffer — `draw(4, count)`, or
+  `drawIndirect` when a reduction supplied indirect args.
 
 On the **tiled** path the composition is the same upstream (reduction feeds the preprocess pass
 fewer splats), and the Sort axis selects the tile pipeline's global `(tile, depth)` sort backend.
