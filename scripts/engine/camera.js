@@ -86,4 +86,17 @@ export class Camera {
     getPosition() {
         return this.eye;
     }
+
+    /**
+     * Deterministically set the orbit pose — for scripted/visual-regression views.
+     * @param {number} rotationX pitch (radians, clamped like the mouse path)
+     * @param {number} rotationY yaw (radians)
+     * @param {number} zoom camera distance from the target
+     */
+    setPose(rotationX, rotationY, zoom) {
+        this.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, rotationX));
+        this.rotation.y = rotationY;
+        this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, zoom));
+        this.updateViewMatrix();
+    }
 }

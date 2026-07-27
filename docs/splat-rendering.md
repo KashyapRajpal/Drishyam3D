@@ -221,6 +221,11 @@ selectable in the UI. A **sort demo/debug** toggle surfaces bitonic-vs-radix tim
 overlay and visualizes post-sort depth order, so the algorithms' effect is legible — the two must
 produce order-equivalent images, which doubles as the radix correctness check.
 
+This pluggable module is designed in full in **[splat-ordering.md](splat-ordering.md)** — an
+`OrderingStrategy` shootout with five selectable, measured backends (bitonic, radix, and
+spatial-partition-based culling, coarse grid, and LOD), including the speed/oracle-diff measurement
+harness and milestone sequencing.
+
 **Reuse** — the SH eval is factored into a shared WGSL string so the preprocess pass and the
 existing instanced path can't diverge; the parse/pack/SH-buffer helpers are unchanged; the tile
 renderer is a second `Renderer` for `kind:'splat'` selected by a scene-level mode.

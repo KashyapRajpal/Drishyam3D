@@ -13,6 +13,9 @@ import defaultFrag from '@assets/shaders/default.frag?raw'
 import defaultWgsl from '@assets/shaders/default.wgsl?raw'
 import splatWgsl from '@assets/shaders/splat.wgsl?raw'
 import splatSortWgsl from '@assets/shaders/splat-sort.wgsl?raw'
+import blitWgsl from '@assets/shaders/blit.wgsl?raw'
+import tileRenderWgsl from '@assets/shaders/splat-tile-render.wgsl?raw'
+import splatCullWgsl from '@assets/shaders/splat-cull.wgsl?raw'
 import defaultScript from '@scripts/scene-script.js?raw'
 import logoJpg from '@assets/logo/drishyam3d_logo.jpg'
 import { setupSettings } from '@engine/settings.js'
@@ -68,6 +71,10 @@ function normalizeText(value) {
   return String(value).replace(/\r\n/g, '\n')
 }
 
+function formatCount(n) {
+  return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : n.toString()
+}
+
 function StatsOverlay({ stats }) {
   if (!stats) return null
   return (
@@ -87,8 +94,15 @@ function StatsOverlay({ stats }) {
     }}>
       <div>{stats.fps} fps ({stats.frameMs}ms)</div>
       <div>{stats.drawableKind}</div>
-      {stats.triangleCount > 0 && <div>{(stats.triangleCount/1000).toFixed(1)}k tris</div>}
-      {stats.splatCount > 0 && <div>{(stats.splatCount/1000).toFixed(1)}k splats</div>}
+      {stats.triangleCount > 0 && <div>{formatCount(stats.triangleCount)} tris</div>}
+      {stats.splatCount > 0 && <div>{formatCount(stats.splatCount)} splats</div>}
+      {stats.splatCount > 0 && stats.reductionMode === 'culled' && (
+        <div style={{ color: '#6cf' }}>
+          {formatCount(stats.visibleSplats)} vis · {Math.round((1 - stats.visibleSplats / stats.splatCount) * 100)}% culled
+        </div>
+      )}
+      {stats.passMs?.reduce != null && <div style={{ color: '#fc6' }}>reduce {stats.passMs.reduce.toFixed(2)}ms</div>}
+      {stats.passMs?.sort != null && <div style={{ color: '#fc6' }}>sort {stats.passMs.sort.toFixed(2)}ms</div>}
     </div>
   )
 }
@@ -140,7 +154,9 @@ function CodeEditor({ value, onChange, mode, readOnly }) {
 }
 
 export default function App(){
-  const [backend, setBackend] = useState('webgl')
+  // Visual-regression harness loads with ?test=1 and drives WebGPU splats directly.
+  const isVisualTest = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('test')
+  const [backend, setBackend] = useState(isVisualTest ? 'webgpu' : 'webgl')
   const [error, setError] = useState(null)
   const [textured, setTextured] = useState(false)
   const [currentShape, setCurrentShape] = useState('cube')
@@ -148,6 +164,9 @@ export default function App(){
   const [splatLoaded, setSplatLoaded] = useState(false)
   const [splatDebug, setSplatDebug] = useState('off') // 'off' | 'points'
   const [shDegree, setShDegree] = useState(3) // max SH degree used for splat shading
+  const [splatRenderMode, setSplatRenderMode] = useState('instanced') // 'instanced' | 'tile'
+  const [splatSort, setSplatSort] = useState('bitonic') // ordering matrix — sort axis
+  const [splatReduction, setSplatReduction] = useState('none') // ordering matrix — reduction axis
   const [showStats, setShowStats] = useState(false)
   const [stats, setStats] = useState(null)
   const [engineReady, setEngineReady] = useState(0)
@@ -168,6 +187,9 @@ export default function App(){
             wgsl: fileContents[defaultWgslPath] ?? defaultWgsl,
             splatWgsl,
             splatSortWgsl,
+            blitWgsl,
+            tileRenderWgsl,
+            splatCullWgsl,
           }
         : { vertex: fileContents[defaultVertPath], fragment: fileContents[defaultFragPath] }
 
@@ -187,6 +209,9 @@ export default function App(){
         return
       }
       engineRef.current = engine
+
+      // Expose the engine for the visual-regression harness (?test=1 only).
+      if (isVisualTest) window.__DRISHYAM_ENGINE = engine
 
       setupSettings((k,v)=>{})
       geometryFactoryRef.current = backend === 'webgpu'
@@ -223,6 +248,9 @@ export default function App(){
     setSplatLoaded(false)
     setSplatDebug('off')
     setShDegree(3)
+    setSplatRenderMode('instanced')
+    setSplatSort('bitonic')
+    setSplatReduction('none')
   }, [backend])
 
   // Apply the splat debug mode to the active engine.
@@ -242,6 +270,24 @@ export default function App(){
       engine.setSplatShDegree(shDegree)
     }
   }, [engineReady, shDegree, splatLoaded])
+
+  // Apply the splat render mode to the active engine.
+  useEffect(() => {
+    if (!engineReady) return
+    const engine = engineRef.current
+    if (engine && typeof engine.setSplatRenderMode === 'function') {
+      engine.setSplatRenderMode(splatRenderMode)
+    }
+  }, [engineReady, splatRenderMode, splatLoaded])
+
+  // Apply the ordering reduction axis to the active engine.
+  useEffect(() => {
+    if (!engineReady) return
+    const engine = engineRef.current
+    if (engine && typeof engine.setSplatReduction === 'function') {
+      engine.setSplatReduction(splatReduction)
+    }
+  }, [engineReady, splatReduction, splatLoaded])
 
   // Poll stats when visible.
   useEffect(() => {
@@ -776,6 +822,40 @@ export default function App(){
               <a href="#" style={backend === 'webgpu' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setBackend('webgpu') }}>WebGPU</a>
               {splatLoaded && (
                 <>
+                  <div className="menu-separator"></div>
+                  <div className="menu-label" style={{padding:'4px 12px',opacity:0.6,fontSize:'0.8em',userSelect:'none'}}>Splat Ordering</div>
+                  {[
+                    { axis: 'Sort', value: splatSort, set: setSplatSort, opts: [
+                        { k: 'bitonic', l: 'Bitonic' },
+                        { k: 'radix', l: 'Radix', soon: true },
+                    ] },
+                    { axis: 'Reduction', value: splatReduction, set: setSplatReduction, opts: [
+                        { k: 'none', l: 'None' },
+                        { k: 'culled', l: 'Culled' },
+                        { k: 'coarse', l: 'Coarse', soon: true },
+                        { k: 'lod', l: 'LOD', soon: true },
+                    ] },
+                    { axis: 'Render', value: splatRenderMode, set: setSplatRenderMode, opts: [
+                        { k: 'instanced', l: 'Instanced' },
+                        { k: 'tile', l: 'Tile' },
+                    ] },
+                  ].map((row) => (
+                    <div key={row.axis} style={{display:'flex',alignItems:'center',gap:8,padding:'2px 12px'}}>
+                      <span style={{width:70,flexShrink:0,fontSize:'0.78em',opacity:0.6,userSelect:'none'}}>{row.axis}</span>
+                      <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+                        {row.opts.map((o) => o.soon ? (
+                          <span key={o.k} title="Coming soon" style={{display:'inline-block',padding:'1px 6px',fontSize:'0.85em',opacity:0.35,cursor:'default'}}>{o.l}</span>
+                        ) : (
+                          <a
+                            key={o.k}
+                            href="#"
+                            style={{display:'inline-block',padding:'1px 6px',fontSize:'0.85em',borderRadius:3,fontWeight: row.value===o.k?'bold':'normal',background: row.value===o.k?'rgba(120,160,255,0.18)':'transparent'}}
+                            onClick={(e) => { e.preventDefault(); row.set(o.k) }}
+                          >{o.l}</a>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                   <div className="menu-separator"></div>
                   <div className="menu-label" style={{padding:'4px 12px',opacity:0.6,fontSize:'0.8em',userSelect:'none'}}>Splat Debug</div>
                   <a href="#" style={splatDebug === 'off' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setSplatDebug('off') }}>Off</a>
