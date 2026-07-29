@@ -26,6 +26,7 @@ export function buildDrawableFromData(device, data, texture = null, name = 'draw
             texCoord: createVertexBuffer(device, data.texCoords),
             indices:  createIndexBuffer(device, data.indices),
         },
+        kind: 'mesh',
         texture,
         vertexCount: data.vertexCount,
         _debug: { name },
