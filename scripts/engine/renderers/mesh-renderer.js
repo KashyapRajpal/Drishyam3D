@@ -122,7 +122,7 @@ export class MeshRenderer extends Renderer {
         pass.setVertexBuffer(0, drawable.buffers.position);
         pass.setVertexBuffer(1, drawable.buffers.normal);
         pass.setVertexBuffer(2, drawable.buffers.texCoord);
-        pass.setIndexBuffer(drawable.buffers.indices, 'uint16');
+        pass.setIndexBuffer(drawable.buffers.indices, drawable.indexFormat ?? 'uint16');
         pass.drawIndexed(drawable.vertexCount);
         pass.end();
     }

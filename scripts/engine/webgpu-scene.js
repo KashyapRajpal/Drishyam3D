@@ -132,7 +132,13 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
         // --- Shared per-frame state (computed once for every renderer) ---
         const fieldOfView = 45 * Math.PI / 180;
         const aspect = width / height;
-        const projectionMatrix = createPerspectiveMatrix(fieldOfView, aspect, 0.1, 100.0);
+        // Fit near/far to the scene's scale so large scanned meshes (coords in the
+        // hundreds) aren't clipped by a fixed 100-unit far plane; small scenes
+        // (cube/sphere/splat, ~unit-scale) keep the original 0.1 / 100 range.
+        const boundsRadius = drawable?.bounds?.radius ?? 0;
+        const zFar = Math.max(100, (camera.zoom + boundsRadius) * 2 + 10);
+        const zNear = Math.max(0.1, zFar / 1000);
+        const projectionMatrix = createPerspectiveMatrix(fieldOfView, aspect, zNear, zFar);
 
         camera.updateViewMatrix();
         const viewMatrix = camera.getViewMatrix();

@@ -98,7 +98,8 @@ export function createVertexBuffer(device, data) {
 /**
  * Creates a GPU index buffer and uploads data.
  * @param {GPUDevice} device
- * @param {Uint16Array} data
+ * @param {Uint16Array|Uint32Array} data Draw with the matching index format
+ *        ('uint16' / 'uint32'); meshes over 65 535 vertices require Uint32Array.
  * @returns {GPUBuffer}
  */
 export function createIndexBuffer(device, data) {

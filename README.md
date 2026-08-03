@@ -79,11 +79,32 @@ The editor is divided into three main panels and a top menu bar.
 ### Menu Bar
 
 *   **File Menu**:
-    *   `Import .zip`: Loads a `.zip` containing a `.gltf` and its assets (`.bin`, textures).
-    *   `Import Directory`: Opens a directory picker to load a GLTF model from a folder.
     *   `Load Sample Model`: Loads a textured cube GLTF model from the web for quick testing.
-    *   `Load Splat (.ply)`: (WebGPU only) Loads a 3D Gaussian Splatting `.ply` scene.
+    *   `Load Asset…`: Opens a **folder picker** and loads the model inside it (see
+        [Asset folder convention](#asset-folder-convention)). The format is detected automatically:
+        a `.gltf` (with its `.bin`/textures) on either backend, or a `.ply` on **WebGPU** — which is
+        further inferred as a Gaussian **splat** or a triangle **mesh** from its header.
     *   `Reset Scene`: Resets the viewport to the default cube and reloads the original scene script.
+
+#### Asset folder convention
+
+`Load Asset…` selects a **directory**, not a single file — browsers can't read a picked file's
+sibling files, so a folder grant is what lets the companion assets (`.bin`, textures) load
+automatically. Therefore **each asset lives in its own folder**, containing exactly one primary
+model file (`.gltf`, `.glb`, or `.ply`) plus its dependencies (`.bin`, image textures).
+
+Folder structure example:
+```
+my-model/
+  my-model.gltf              (or .glb)
+  my-model.bin
+  textures/
+    my-model_diffuse.jpg
+    my-model_normal.png
+```
+
+Point `Load Asset…` at the folder and everything inside resolves automatically. The loader picks
+the first `.gltf`/`.glb`/`.ply` it finds, so keep one primary model per folder.
 *   **Shapes Menu**:
     *   `Textured` (Checkbox): When checked, any shape loaded from this menu will use the default checkerboard texture. This setting updates the current shape in real-time.
     *   `Cube` / `Sphere`: Loads a primitive cube or sphere into the scene.
@@ -95,7 +116,7 @@ The editor is divided into three main panels and a top menu bar.
 
 #### Triangle-Based Rendering
 
-1.  **Load a Model**: Use **File > Load Sample Model**, **File > Import .zip**, or **Shapes > Sphere** to get an object in the scene.
+1.  **Load a Model**: Use **File > Load Sample Model**, **File > Load Asset…** (pick a model folder), or **Shapes > Sphere** to get an object in the scene.
 2.  **Animate the Model**:
     *   In the Explorer, double-click `scene-script.js`.
     *   Modify the `update` function to change the model's rotation, position, or scale. For example, change `state.modelRotation += deltaTime * 0.5;` to `state.modelRotation += deltaTime * 2.0;` to make it spin faster.
@@ -109,7 +130,7 @@ The editor is divided into three main panels and a top menu bar.
 #### 3D Gaussian Splatting (WebGPU Only)
 
 1.  **Switch to WebGPU**: Open Settings → **Renderer** → **WebGPU** (requires Chrome/Edge 113+).
-2.  **Load a Splat Scene**: Use **File > Load Splat (.ply)** and select a `.ply` file from a 3DGS capture.
+2.  **Load a Splat Scene**: Use **File > Load Asset…** and pick a folder containing a 3DGS `.ply` capture (it's detected as a splat automatically).
 3.  **Inspect Geometry** (Optional):
     *   Open Settings → **Splat Debug** and cycle through:
         *   **Points**: See raw splat centers (validates loading & projection).

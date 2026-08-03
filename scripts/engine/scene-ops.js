@@ -5,6 +5,113 @@
  */
 
 import { parseGltfForBackend } from './gltf-parser.js';
+import { parseMeshPly } from './mesh-ply-loader.js';
+
+const IMAGE_RE = /\.(jpe?g|png|webp)$/i;
+
+/**
+ * Infers what a `.ply` actually contains from its ASCII header — the extension
+ * alone is ambiguous (3D-Gaussian-splat clouds and triangle meshes both use it).
+ * @param {string} headerText decoded header (through `end_header`)
+ * @returns {'splat' | 'mesh'}
+ */
+export function detectPlyKind(headerText) {
+    // 3DGS clouds carry per-splat SH/rotation attributes; meshes carry faces.
+    if (/\bf_dc_0\b/.test(headerText) || (/\bscale_0\b/.test(headerText) && /\brot_0\b/.test(headerText))) {
+        return 'splat';
+    }
+    if (/\belement\s+face\b/.test(headerText)) return 'mesh';
+    // Bare xyz point cloud with neither signal — render it as (grey) splats.
+    return 'splat';
+}
+
+/**
+ * Single entry point for loading a user-picked asset. Infers the format and
+ * routes to the splat / mesh / glTF path.
+ * @param {{ engine: object, files: File[]|FileList, flipY?: boolean }} args
+ * @returns {Promise<{ kind: 'splat'|'mesh'|'gltf', drawable: object }>}
+ */
+export async function loadAssetFiles({ engine, files, flipY = true }) {
+    const list = Array.from(files);
+    const image = list.find((f) => IMAGE_RE.test(f.name));
+    const zipFile = list.find((f) => /\.zip$/i.test(f.name));
+    const gltfFile = list.find((f) => /\.(gltf|glb)$/i.test(f.name));
+    const plyFile = list.find((f) => /\.ply$/i.test(f.name));
+
+    if (zipFile) {
+        const drawable = await importZipFile({ engine, file: zipFile });
+        return { kind: 'gltf', drawable };
+    }
+
+    if (gltfFile) {
+        const fileMap = new Map(list.map((f) => [f.name, f])); // let it resolve companion .bin / textures
+        const drawable = await parseGltfForBackend(engine, fileMap);
+        engine.scene.loadGeometry(drawable);
+        frameCamera(engine.camera, drawable);
+        return { kind: 'gltf', drawable };
+    }
+
+    if (plyFile) {
+        const headerText = new TextDecoder('ascii').decode(
+            new Uint8Array(await plyFile.slice(0, 64 * 1024).arrayBuffer()),
+        );
+        if (detectPlyKind(headerText) === 'splat') {
+            const drawable = await loadSplatFile({ engine, file: plyFile, flipY });
+            return { kind: 'splat', drawable };
+        }
+        const drawable = await loadMeshFile({ engine, files: image ? [plyFile, image] : [plyFile] });
+        return { kind: 'mesh', drawable };
+    }
+
+    throw new Error('Unsupported file. Select a .gltf/.glb/.zip, or (on WebGPU) a .ply — plus a texture image if the mesh needs one.');
+}
+
+/**
+ * Loads an asset from a picked directory: finds the primary `.gltf`/`.ply` and
+ * pulls its companion files (`.bin`, textures) straight from the same folder.
+ *
+ * A directory grant is what makes "select the model, auto-load its neighbours"
+ * possible — a single-file pick can't read sibling files — and it preserves the
+ * relative paths (`textures/…`) that external glTF resources reference.
+ *
+ * @param {{ engine: object, dirHandle: FileSystemDirectoryHandle, flipY?: boolean }} args
+ * @returns {Promise<{ kind: 'splat'|'mesh'|'gltf', drawable: object }>}
+ */
+export async function loadAssetFromDirectory({ engine, dirHandle, flipY = true }) {
+    const dirMap = await buildFileMapFromDirectory(dirHandle);
+    const paths = Array.from(dirMap.keys());
+    const gltfPath = paths.find((p) => /\.gltf$/i.test(p));
+    const plyPath = paths.find((p) => /\.ply$/i.test(p));
+
+    if (gltfPath) {
+        // Order the glTF first so parseGltfAsset picks it as the main file and
+        // derives baseUrl from its folder; the rest resolve as companions.
+        const orderedMap = new Map();
+        orderedMap.set(gltfPath, dirMap.get(gltfPath));
+        dirMap.forEach((file, path) => { if (path !== gltfPath) orderedMap.set(path, file); });
+        const drawable = await parseGltfForBackend(engine, orderedMap);
+        engine.scene.loadGeometry(drawable);
+        frameCamera(engine.camera, drawable);
+        return { kind: 'gltf', drawable };
+    }
+
+    if (plyPath) {
+        const plyFile = dirMap.get(plyPath);
+        const headerText = new TextDecoder('ascii').decode(
+            new Uint8Array(await plyFile.slice(0, 64 * 1024).arrayBuffer()),
+        );
+        if (detectPlyKind(headerText) === 'splat') {
+            const drawable = await loadSplatFile({ engine, file: plyFile, flipY });
+            return { kind: 'splat', drawable };
+        }
+        const imgPath = paths.find((p) => IMAGE_RE.test(p));
+        const files = imgPath ? [plyFile, dirMap.get(imgPath)] : [plyFile];
+        const drawable = await loadMeshFile({ engine, files });
+        return { kind: 'mesh', drawable };
+    }
+
+    throw new Error('No .gltf or .ply found in the selected folder.');
+}
 
 export function frameCamera(camera, drawable) {
     if (!camera || !drawable || !drawable.bounds) return;
@@ -33,12 +140,40 @@ export async function resetScene({ engine, geometryFactory }) {
     engine.scene.loadGeometry(cube);
 }
 
-export async function loadSplatFile({ engine, file }) {
+export async function loadSplatFile({ engine, file, flipY = true }) {
     if (typeof engine.loadSplats !== 'function') {
         throw new Error('Splat loading requires the WebGPU backend.');
     }
     const arrayBuffer = await file.arrayBuffer();
-    const drawable = engine.loadSplats(arrayBuffer);
+    const drawable = engine.loadSplats(arrayBuffer, { flipY });
+    frameCamera(engine.camera, drawable);
+    return drawable;
+}
+
+/**
+ * Loads a triangle-mesh `.ply` plus an optional companion image texture.
+ * @param {{ engine: object, files: File[]|FileList }} args `files` should
+ *        contain the `.ply` and (for textured meshes) its image.
+ */
+export async function loadMeshFile({ engine, files }) {
+    if (typeof engine.loadMesh !== 'function') {
+        throw new Error('Mesh loading requires the WebGPU backend.');
+    }
+    const list = Array.from(files);
+    const plyFile = list.find((f) => /\.ply$/i.test(f.name));
+    if (!plyFile) throw new Error('Select a .ply mesh file.');
+    const imgFile = list.find((f) => IMAGE_RE.test(f.name));
+
+    const meshData = parseMeshPly(await plyFile.arrayBuffer());
+    meshData.name = plyFile.name.replace(/\.ply$/i, '');
+
+    let textureBitmap = null;
+    if (imgFile) textureBitmap = await createImageBitmap(imgFile);
+    else if (meshData.hasTexture) {
+        throw new Error(`"${plyFile.name}" is a textured mesh — also select its image file (e.g. the companion .jpg).`);
+    }
+
+    const drawable = engine.loadMesh({ meshData, textureBitmap });
     frameCamera(engine.camera, drawable);
     return drawable;
 }

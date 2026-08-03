@@ -23,9 +23,8 @@ import {
   loadShape,
   resetScene as resetSceneOp,
   loadSampleGltf,
-  loadSplatFile,
-  importZipFile,
-  importFolderHandle,
+  loadAssetFiles,
+  loadAssetFromDirectory,
 } from '@engine/scene-ops.js'
 
 const shaderFiles = import.meta.glob('../../assets/shaders/**/*.{vert,frag,glsl,wgsl}', { query: '?raw', import: 'default' })
@@ -167,6 +166,7 @@ export default function App(){
   const [splatRenderMode, setSplatRenderMode] = useState('instanced') // 'instanced' | 'tile'
   const [splatSort, setSplatSort] = useState('bitonic') // ordering matrix — sort axis
   const [splatReduction, setSplatReduction] = useState('none') // ordering matrix — reduction axis
+  const [flipSplatY, setFlipSplatY] = useState(true) // reflect splat cloud about XZ plane (most captures are y-down)
   const [showStats, setShowStats] = useState(false)
   const [stats, setStats] = useState(null)
   const [engineReady, setEngineReady] = useState(0)
@@ -251,6 +251,7 @@ export default function App(){
     setSplatRenderMode('instanced')
     setSplatSort('bitonic')
     setSplatReduction('none')
+    setFlipSplatY(true)
   }, [backend])
 
   // Apply the splat debug mode to the active engine.
@@ -289,6 +290,15 @@ export default function App(){
     }
   }, [engineReady, splatReduction, splatLoaded])
 
+  // Apply the Y-flip toggle to the active splat cloud (re-packs in place, no re-parse).
+  useEffect(() => {
+    if (!engineReady) return
+    const engine = engineRef.current
+    if (engine && typeof engine.setSplatFlipY === 'function') {
+      engine.setSplatFlipY(flipSplatY)
+    }
+  }, [engineReady, flipSplatY, splatLoaded])
+
   // Poll stats when visible.
   useEffect(() => {
     if (!showStats || !engineReady) return
@@ -315,76 +325,6 @@ export default function App(){
   }, [engineReady, currentShape, textured, hasModelLoaded])
 
   // --- File menu handlers ---
-  async function handleImportZip(e) {
-    e.preventDefault()
-    const engine = engineRef.current
-    if (!engine) return
-    if (pickerActiveRef.current || window.__DRISHYAM_PICKER_ACTIVE) return
-    pickerActiveRef.current = true
-    window.__DRISHYAM_PICKER_ACTIVE = true
-    engine.scene.loadGeometry(null)
-    try {
-      let file
-      if (window.showOpenFilePicker) {
-        const [handle] = await window.showOpenFilePicker({
-          multiple: false,
-          types: [{
-            description: 'Zip Archives',
-            accept: {
-              'application/zip': ['.zip'],
-              'application/x-zip-compressed': ['.zip'],
-              'application/octet-stream': ['.zip'],
-            },
-          }],
-        })
-        if (!handle) return
-        file = await handle.getFile()
-      } else {
-        const input = document.querySelector('#model-file-input')
-        input.accept = '.zip'
-        input.multiple = false
-        file = await new Promise((resolve) => {
-          input.onchange = () => resolve(input.files?.[0])
-          input.click()
-        })
-        if (!file) return
-      }
-      await importZipFile({ engine, file })
-      setHasModelLoaded(true)
-      setError(null)
-    } catch (err) {
-      if (err?.name !== 'AbortError') setError(err?.message || String(err))
-    } finally {
-      pickerActiveRef.current = false
-      window.__DRISHYAM_PICKER_ACTIVE = false
-    }
-  }
-
-  async function handleImportFolder(e) {
-    e.preventDefault()
-    const engine = engineRef.current
-    if (!engine) return
-    if (pickerActiveRef.current || window.__DRISHYAM_PICKER_ACTIVE) return
-    if (!window.showDirectoryPicker) {
-      setError("Directory picker not supported. Use 'Import Zip' instead.")
-      return
-    }
-    pickerActiveRef.current = true
-    window.__DRISHYAM_PICKER_ACTIVE = true
-    engine.scene.loadGeometry(null)
-    try {
-      const dirHandle = await window.showDirectoryPicker()
-      await importFolderHandle({ engine, dirHandle })
-      setHasModelLoaded(true)
-      setError(null)
-    } catch (err) {
-      if (err?.name !== 'AbortError') setError(err?.message || String(err))
-    } finally {
-      pickerActiveRef.current = false
-      window.__DRISHYAM_PICKER_ACTIVE = false
-    }
-  }
-
   async function handleLoadSample(e) {
     e.preventDefault()
     const engine = engineRef.current
@@ -398,42 +338,40 @@ export default function App(){
     }
   }
 
-  async function handleLoadSplat(e) {
+  // Unified asset load: pick the folder containing the model — the loader finds
+  // the .gltf/.ply inside, auto-loads its companion files (.bin, textures), and
+  // infers splat / mesh / glTF. A single-file pick can't read sibling files, so a
+  // directory grant is what makes companion auto-loading possible.
+  async function handleLoadAsset(e) {
     e.preventDefault()
     const engine = engineRef.current
     if (!engine) return
-    if (typeof engine.loadSplats !== 'function') {
-      setError('Splat loading requires the WebGPU backend.')
-      return
-    }
     if (pickerActiveRef.current || window.__DRISHYAM_PICKER_ACTIVE) return
     pickerActiveRef.current = true
     window.__DRISHYAM_PICKER_ACTIVE = true
     try {
-      let file
-      if (window.showOpenFilePicker) {
-        const [handle] = await window.showOpenFilePicker({
-          multiple: false,
-          types: [{ description: '3D Gaussian Splat', accept: { 'application/octet-stream': ['.ply'] } }],
-        })
-        if (!handle) return
-        file = await handle.getFile()
+      let kind
+      if (window.showDirectoryPicker) {
+        const dirHandle = await window.showDirectoryPicker()
+        ;({ kind } = await loadAssetFromDirectory({ engine, dirHandle, flipY: flipSplatY }))
       } else {
+        // Fallback (no directory API): multi-select the model + its companions.
+        const isWebGPU = backend === 'webgpu'
         const input = document.querySelector('#model-file-input')
-        input.accept = '.ply'
-        input.multiple = false
-        file = await new Promise((resolve) => {
-          input.onchange = () => resolve(input.files?.[0])
+        input.accept = isWebGPU ? '.ply,.gltf,.bin,image/*' : '.gltf,.bin,image/*'
+        input.multiple = true
+        const files = await new Promise((resolve) => {
+          input.onchange = () => resolve(Array.from(input.files || []))
           input.click()
         })
-        if (!file) return
+        if (!files?.length) return
+        ;({ kind } = await loadAssetFiles({ engine, files, flipY: flipSplatY }))
       }
-      await loadSplatFile({ engine, file })
+      setSplatLoaded(kind === 'splat')
       setHasModelLoaded(true)
-      setSplatLoaded(true)
       setError(null)
     } catch (err) {
-      if (err?.name !== 'AbortError') setError(`Splat Error: ${err?.message || String(err)}`)
+      if (err?.name !== 'AbortError') setError(`Load Asset Error: ${err?.message || String(err)}`)
     } finally {
       pickerActiveRef.current = false
       window.__DRISHYAM_PICKER_ACTIVE = false
@@ -780,18 +718,10 @@ export default function App(){
           <div id="file-menu-container" className="menu-container">
             <div className="menu-item" role="button" tabIndex="0" aria-label="File menu">File</div>
             <div className="dropdown-content">
-              <div className="menu-submenu">
-                <div className="menu-item">Import Model</div>
-                <div className="dropdown-content sub-dropdown">
-                  <a href="#" onClick={handleImportZip} title="Load zip containing gltf model">Import .zip</a>
-                  <a href="#" onClick={handleImportFolder} title="Load directory containing gltf model">Import Directory</a>
-                </div>
-              </div>
-              <div className="menu-separator"></div>
               <a href="#" onClick={handleLoadSample}>Load Sample Model</a>
-              {backend === 'webgpu'
-                ? <a href="#" onClick={handleLoadSplat} title="Load a 3D Gaussian Splatting .ply file">Load Splat (.ply)</a>
-                : <a href="#" className="disabled" title="Switch to the WebGPU renderer to load splats">Load Splat (WebGPU only)</a>}
+              <a href="#" onClick={handleLoadAsset} title={backend === 'webgpu'
+                ? "Select the model's folder — the .gltf or .ply inside loads with its .bin/textures automatically (splat vs mesh detected)."
+                : "Select the model's folder — the .gltf inside loads with its .bin/textures. (Switch to WebGPU for .ply splats/meshes.)"}>Load Asset…</a>
               <div className="menu-separator"></div>
               <a href="#" onClick={handleResetScene}>Reset Scene</a>
             </div>
@@ -871,6 +801,12 @@ export default function App(){
                       onClick={(e) => { e.preventDefault(); setShDegree(d) }}
                     >{d === 0 ? '0 (flat)' : String(d)}</a>
                   ))}
+                  <div className="menu-separator"></div>
+                  <div className="menu-label" style={{padding:'4px 12px',opacity:0.6,fontSize:'0.8em',userSelect:'none'}}>Orientation</div>
+                  <a href="#" className="menu-checkbox" title="Reflect the cloud about the XZ plane (most captures are stored y-down)" onClick={(e) => { e.preventDefault(); setFlipSplatY(v => !v) }}>
+                    <input type="checkbox" checked={flipSplatY} onChange={() => {}} style={{pointerEvents:'none'}} />
+                    <label style={flipSplatY ? {fontWeight:'bold'} : {}}>Flip Y</label>
+                  </a>
                 </>
               )}
               <div className="menu-separator"></div>
