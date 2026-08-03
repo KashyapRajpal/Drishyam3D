@@ -20,6 +20,40 @@ Drishyam3D is a lightweight, browser-based 3D scene editor built with **WebGPU**
 *   **Error Console**: Displays compilation and runtime errors from your code to help with debugging.
 *   **Clean, Resizable UI**: A modern React-based layout with tabbed editors and responsive panels.
 
+## Screenshots & Demo
+
+### Editor Interface
+The Drishyam3D editor provides a professional three-panel layout for interactive 3D development:
+
+![Drishyam3D Editor with glTF Model](drishyam-editor-clean.png)
+
+**Key Features Visible:**
+- **Left Panel**: Explorer showing project files, shaders (WGSL for WebGPU), and engine modules
+- **Center Panel**: Real-time 3D viewport with WebGPU rendering showing a textured glTF model
+- **Right Panel**: Code editor with syntax highlighting for scene scripts and shaders
+- **Auto-reload**: Real-time updates as you edit code
+
+### 3D Gaussian Splatting Rendering
+Drishyam3D supports modern neural rendering techniques. Load and render 3D Gaussian Splat scenes (.ply format) with GPU-accelerated depth sorting:
+
+![Drishyam3D Gaussian Splat Rendering](drishyam-splat-render.png)
+
+The tree above was captured using 3D Gaussian Splatting and is rendered in real-time with:
+- **Per-frame depth sorting** via WebGPU compute shaders
+- **Premultiplied alpha blending** for correct transparency
+- **Interactive camera control** for 360° viewing
+- **Debug visualization modes** (Points, Points-Sorted) for validation
+
+### Capabilities
+- **Dual Rendering**: Switch between WebGL (legacy) and WebGPU (modern) backends in Settings
+- **Model Import**: Load glTF models, 3D Gaussian Splats (.ply), and procedural shapes
+- **Shader Editing**: Write custom WGSL (WebGPU) or GLSL (WebGL) shaders with real-time feedback
+- **Scene Scripting**: Control objects, animations, and interactions with JavaScript
+- **Neural Rendering**: Render 3D Gaussian Splatting scenes with GPU-accelerated depth sorting
+- **Seamless Integration**: Mix traditional geometry and splats in the same scene
+
+For a live demo, visit: [**https://kashyaprajpal.github.io/Drishyam3D/**](https://kashyaprajpal.github.io/Drishyam3D/)
+
 ## How to Run
 
 ### Prerequisites
@@ -180,11 +214,43 @@ Hardware-accelerated ray tracing for photorealistic lighting, shadows, and refle
 
 Contributions are welcome! Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before participating. If you have a feature request, bug report, or want to contribute code, please feel free to open an issue or submit a pull request.
 
+### Contribution Workflow
+
 1.  Fork the Project
 2.  Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
 3.  Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
 4.  Push to the Branch (`git push origin feature/AmazingFeature`)
 5.  Open a Pull Request
+
+### For New Features: Include a Demo
+
+To help reviewers and future users understand your feature, **please include visual documentation** in your pull request:
+
+- **Screenshots**: Capture key states or results of your feature (use `npm run dev` to run the app and take screenshots)
+- **Short Video**: Record a 10-30 second video showing the feature in action. Tools:
+  - **macOS**: QuickTime Player (File → New Screen Recording) or ScreenFlow
+  - **Windows**: Windows 10/11 Game Bar (Win+G) or OBS Studio
+  - **Linux**: OBS Studio or SimpleScreenRecorder
+  
+  Export as **MP4** and add to your PR description or comments using GitHub's video upload.
+
+- **GIF for Quick Demos**: Use tools like [ffmpeg](https://ffmpeg.org/) or [gifshot](https://yahoo.github.io/gifshot/) to create animated GIFs (especially useful for small interactions)
+
+**Example PR Description:**
+```markdown
+## What's New
+Added real-time shader error highlighting in the editor.
+
+## Demo
+[Attach video or GIF showing the error highlighting in action]
+
+## Testing
+- Load a shader with syntax errors
+- Verify red underlines appear in the code
+- Fix the error and confirm highlighting clears
+```
+
+This helps reviewers understand the context faster and makes it easier for new contributors to see what's possible with Drishyam3D!
 
 ## License
 
