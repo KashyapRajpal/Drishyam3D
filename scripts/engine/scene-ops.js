@@ -10,6 +10,21 @@ import { parseMeshPly } from './mesh-ply-loader.js';
 const IMAGE_RE = /\.(jpe?g|png|webp)$/i;
 
 /**
+ * Finds a texture file that pairs with a model file by basename.
+ * For example, "Bear.ply" matches "Bear_0.jpg", "Bear_diffuse.jpg", or just "Bear.jpg".
+ * Returns the first match, or null if none found.
+ */
+export function findTextureByBasename(modelFile, candidateFiles) {
+    const modelBase = modelFile.name.replace(/\.[^.]+$/, '');
+    const textures = candidateFiles.filter((f) => IMAGE_RE.test(f.name));
+    // Exact base match: "Bear.ply" + "Bear.jpg" or "Bear_*.jpg"
+    return textures.find((f) => {
+        const texBase = f.name.replace(/\.[^.]+$/, '');
+        return texBase === modelBase || texBase.startsWith(modelBase + '_');
+    }) || null;
+}
+
+/**
  * Infers what a `.ply` actually contains from its ASCII header — the extension
  * alone is ambiguous (3D-Gaussian-splat clouds and triangle meshes both use it).
  * @param {string} headerText decoded header (through `end_header`)
@@ -33,7 +48,6 @@ export function detectPlyKind(headerText) {
  */
 export async function loadAssetFiles({ engine, files, flipY = true }) {
     const list = Array.from(files);
-    const image = list.find((f) => IMAGE_RE.test(f.name));
     const zipFile = list.find((f) => /\.zip$/i.test(f.name));
     const gltfFile = list.find((f) => /\.(gltf|glb)$/i.test(f.name));
     const plyFile = list.find((f) => /\.ply$/i.test(f.name));
@@ -59,7 +73,8 @@ export async function loadAssetFiles({ engine, files, flipY = true }) {
             const drawable = await loadSplatFile({ engine, file: plyFile, flipY });
             return { kind: 'splat', drawable };
         }
-        const drawable = await loadMeshFile({ engine, files: image ? [plyFile, image] : [plyFile] });
+        const texture = findTextureByBasename(plyFile, list);
+        const drawable = await loadMeshFile({ engine, files: texture ? [plyFile, texture] : [plyFile] });
         return { kind: 'mesh', drawable };
     }
 
@@ -104,8 +119,8 @@ export async function loadAssetFromDirectory({ engine, dirHandle, flipY = true }
             const drawable = await loadSplatFile({ engine, file: plyFile, flipY });
             return { kind: 'splat', drawable };
         }
-        const imgPath = paths.find((p) => IMAGE_RE.test(p));
-        const files = imgPath ? [plyFile, dirMap.get(imgPath)] : [plyFile];
+        const texture = findTextureByBasename(plyFile, Array.from(dirMap.values()));
+        const files = texture ? [plyFile, texture] : [plyFile];
         const drawable = await loadMeshFile({ engine, files });
         return { kind: 'mesh', drawable };
     }
