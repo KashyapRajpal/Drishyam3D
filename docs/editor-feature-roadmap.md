@@ -132,6 +132,90 @@ reuse (engine→UI stats channel, generalized editable-file model, offscreen-ren
   `webgl-facade.js` + `assets/shaders/default.frag`, both facades
   (`setObjectTexture(slot, bitmap)`), `App.jsx`.
 
+## Phase 6 — Multi-format asset loading (mesh + splat)
+
+*Turns the two hardcoded entry points (`parsePly` for 3DGS, `parseGltf` for glTF) into a
+format-dispatch layer so new formats are additive, and adds the formats users actually have.*
+
+### Motivation
+
+A `.ply` extension says nothing about the payload — the same container holds Gaussian splats,
+textured triangle meshes (vertex xyz + faces + `multi_texture_vertex` UVs + an external image), and
+vertex-coloured meshes (per-vertex `red/green/blue`). Dispatch must inspect the header, not the
+extension, and the loader set must cover meshes as well as splats.
+
+### Architecture
+
+- **Loader registry** `scripts/engine/loaders/registry.js`: `pickLoader(filename, bytes)` inspects
+  extension + magic/header and returns `{ kind: 'mesh' | 'splat', parse(buffer) }`. Each parser stays
+  **pure** (typed arrays out, no GPU); the facade owns upload — same split as `ply-loader.js` today.
+- **Single UI entry point:** facades expose `engine.loadModel(files)`; `App.jsx`'s Load actions all
+  funnel through it. Multi-file assets (a PLY + its external texture) come in via a multi-select
+  picker (`showOpenFilePicker({ multiple: true })`, fallback `<input type=file multiple>`) or a
+  directory picker; the registry pairs them by basename.
+
+### Mesh formats
+
+- **PLY meshes (Artec / generic)** — *implemented first, see Phase 6a below.* vertex `x/y/z`
+  (+ optional `red/green/blue`, `nx/ny/nz`), `face` polygons (triangulated), `multi_texture_vertex`
+  `u/v` + `multi_texture_face` indirect UV indices, external image texture. New
+  `scripts/engine/mesh-ply-loader.js`.
+- **GLB (binary glTF)** — extend `gltf-parser.js` to accept the 12-byte GLB header + JSON/BIN chunks
+  and embedded images, so one code path serves `.gltf` and `.glb`. (Today the parser `JSON.parse`s
+  the whole file, so it only handles text `.gltf`; `.glb` needs the chunk reader.)
+- **Deferred:** Draco / meshopt compression, OBJ.
+
+> **Note — glTF is becoming a splat container too.** glTF now carries 3D Gaussian splats via Khronos
+> extensions (`KHR_gaussian_splatting`, with `KHR_spz_gaussian_splats_compression` for the SPZ
+> payload). This **collapses the mesh/splat dispatch boundary**: a single `.gltf`/`.glb` can yield a
+> *splat cloud* rather than a triangle mesh, decided by the presence of the extension, not the file
+> type. So the GLB reader must branch on `extensionsUsed` and feed the splat pipeline
+> (`packSplats` + splat renderers) when the extension is present — the same normalization target the
+> other splat formats use. Worth building the GLB reader with this in mind rather than as mesh-only.
+
+### Splat formats
+
+All normalize to the existing parsed arrays
+(`{ positions, colors, opacities, scales, rotations, shCoeffs, ... }`) so `packSplats` + the splat
+renderers are untouched.
+
+- **INRIA binary PLY** — current `ply-loader.js`.
+- **`.splat`** (antimatter15) — 32 B/splat: position f32×3, scale f32×3, rgba u8×4, rot u8×4. Trivial,
+  widely shared.
+- **`.spz`** (Niantic) — gzip-compressed, quantized positions/SH. Inflate via the built-in
+  `DecompressionStream('gzip')` (no dependency), then dequantize. *(Likely the "snz" format asked
+  about.)*
+- **Deferred:** `.ksplat`, SOG/`.sog`.
+
+### Phase 6a — Textured/colored PLY mesh (the immediate slice)
+
+The first, independently shippable cut (WebGPU): render textured and vertex-coloured PLY meshes.
+
+- **Parser** `mesh-ply-loader.js` (pure): produce `{ positions, normals, texCoords, colors?, indices
+  (Uint32), vertexCount, bounds }`. Expand per-face corners to resolve the Artec indirect UV
+  indexing; compute normals when absent; triangulate n-gon faces by fan.
+- **uint32 indices:** `MeshRenderer.record` currently hardcodes `setIndexBuffer(..., 'uint16')`;
+  read `drawable.indexFormat ?? 'uint16'` and let `createIndexBuffer` accept `Uint32Array`
+  (400k verts ≫ 65 535).
+- **Vertex color (Vase):** add an optional `@location(3)` color attribute to `default.wgsl` + the mesh
+  pipeline; cube/sphere/bear supply a white default so the shared layout is uniform. Fragment
+  multiplies it in alongside `baseColor`/`texColor`.
+- **Texture (Bear):** the companion JPEG loads via the multi-select picker → `createImageBitmap` →
+  `createTextureFromImageBitmap` (helper already exists), assigned to `drawable.texture`.
+- **Facade + UI:** `engine.loadMesh({ mesh, textureBitmap })`, a `loadMeshFile` in `scene-ops.js`, and
+  a **Load Mesh…** action. Reuse the existing `frameCamera` + the (now working) triangle-count stats.
+- **Files:** new `scripts/engine/mesh-ply-loader.js`, `mesh-renderer.js`, `webgpu-helpers.js`,
+  `assets/shaders/default.wgsl`, `webgpu-facade.js`, `scene-ops.js`, `App.jsx`, `__tests__/`.
+
+### Risks
+
+- Large meshes on **WebGL 1.0** need `OES_element_index_uint` for uint32 indices (or 16-bit
+  sub-batching); Phase 6a is **WebGPU-first**, WebGL mesh parity tracked separately.
+- Adding a vertex-color attribute changes the shared mesh vertex layout — every mesh drawable
+  (cube/sphere/glTF) must supply the buffer (default white) to keep one pipeline.
+- Multi-file assets depend on File System Access multi-select; the `<input>` fallback must accept
+  `.ply` + image together.
+
 ---
 
 ## Verification (per phase)
@@ -146,6 +230,8 @@ Run `cd ui && npm run dev` and exercise each phase in the browser on **both** ba
 - **P3:** enable compare, drag the divider → left/right show the selected modes.
 - **P4:** enable blur then DoF; edit `blur.effect.*`, Apply → live recompile; sliders work; both backends.
 - **P5:** assign different images to albedo/normal slots → a custom shader samples both.
+- **P6a:** Load Mesh… a textured PLY (`.ply` + image) → a solid textured surface; a vertex-coloured
+  PLY → correct per-vertex colors; triangle count shows in the stats overlay.
 
 Add Jest tests for pure logic introduced (effect-header parser, stats math, compare-split math)
 alongside the existing `__tests__/` suites; run `npm test` from the repo root.

@@ -189,6 +189,25 @@ export async function parseGltfForBackend(engine, source) {
 }
 
 /**
+ * Resolves a glTF-referenced resource against a local file map by exact path,
+ * then falls back to matching on basename. The fallback lets a flat selection
+ * (file handles carry only bare names, no folders) satisfy a URI like
+ * `textures/foo.jpg`; a directory selection (which keeps relative paths) hits
+ * the exact-path branch.
+ * @param {Map<string, File>} localFileMap
+ * @param {string} fullPath baseUrl + uri
+ * @returns {File|null}
+ */
+function resolveLocalFile(localFileMap, fullPath) {
+    if (localFileMap.has(fullPath)) return localFileMap.get(fullPath);
+    const base = fullPath.split('/').pop();
+    for (const [key, file] of localFileMap) {
+        if (key.split('/').pop() === base) return file;
+    }
+    return null;
+}
+
+/**
  * Parses GLTF into backend-agnostic typed arrays and optional texture bitmap.
  * @param {ArrayBuffer | string | FileList | Map<string, File>} source
  * @returns {Promise<object>}
@@ -267,7 +286,7 @@ export async function parseGltfAsset(source) {
 
     if (buffer.uri) {
         const bufferPath = baseUrl + buffer.uri;
-        const localBinFile = localFileMap.get(bufferPath);
+        const localBinFile = resolveLocalFile(localFileMap, bufferPath);
         if (localBinFile) {
             binaryBufferData = await localBinFile.arrayBuffer();
         } else if (baseUrl) {
@@ -303,7 +322,7 @@ export async function parseGltfAsset(source) {
             let imageFile = null;
             let imageUrl;
             const imagePath = baseUrl + imageSource.uri;
-            const localImageFile = localFileMap.get(imagePath);
+            const localImageFile = resolveLocalFile(localFileMap, imagePath);
             if (localImageFile) {
                 imageFile = localImageFile;
             } else if (baseUrl) {

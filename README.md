@@ -20,6 +20,40 @@ Drishyam3D is a lightweight, browser-based 3D scene editor built with **WebGPU**
 *   **Error Console**: Displays compilation and runtime errors from your code to help with debugging.
 *   **Clean, Resizable UI**: A modern React-based layout with tabbed editors and responsive panels.
 
+## Screenshots & Demo
+
+### Editor Interface
+The Drishyam3D editor provides a professional three-panel layout for interactive 3D development:
+
+![Drishyam3D Editor with glTF Model](drishyam-editor-clean.png)
+
+**Key Features Visible:**
+- **Left Panel**: Explorer showing project files, shaders (WGSL for WebGPU), and engine modules
+- **Center Panel**: Real-time 3D viewport with WebGPU rendering showing a textured glTF model
+- **Right Panel**: Code editor with syntax highlighting for scene scripts and shaders
+- **Auto-reload**: Real-time updates as you edit code
+
+### 3D Gaussian Splatting Rendering
+Drishyam3D supports modern neural rendering techniques. Load and render 3D Gaussian Splat scenes (.ply format) with GPU-accelerated depth sorting:
+
+![Drishyam3D Gaussian Splat Rendering](drishyam-splat-render.png)
+
+The tree above was captured using 3D Gaussian Splatting and is rendered in real-time with:
+- **Per-frame depth sorting** via WebGPU compute shaders
+- **Premultiplied alpha blending** for correct transparency
+- **Interactive camera control** for 360° viewing
+- **Debug visualization modes** (Points, Points-Sorted) for validation
+
+### Capabilities
+- **Dual Rendering**: Switch between WebGL (legacy) and WebGPU (modern) backends in Settings
+- **Model Import**: Load glTF models, 3D Gaussian Splats (.ply), and procedural shapes
+- **Shader Editing**: Write custom WGSL (WebGPU) or GLSL (WebGL) shaders with real-time feedback
+- **Scene Scripting**: Control objects, animations, and interactions with JavaScript
+- **Neural Rendering**: Render 3D Gaussian Splatting scenes with GPU-accelerated depth sorting
+- **Seamless Integration**: Mix traditional geometry and splats in the same scene
+
+For a live demo, visit: [**https://kashyaprajpal.github.io/Drishyam3D/**](https://kashyaprajpal.github.io/Drishyam3D/)
+
 ## How to Run
 
 ### Prerequisites
@@ -79,11 +113,32 @@ The editor is divided into three main panels and a top menu bar.
 ### Menu Bar
 
 *   **File Menu**:
-    *   `Import .zip`: Loads a `.zip` containing a `.gltf` and its assets (`.bin`, textures).
-    *   `Import Directory`: Opens a directory picker to load a GLTF model from a folder.
     *   `Load Sample Model`: Loads a textured cube GLTF model from the web for quick testing.
-    *   `Load Splat (.ply)`: (WebGPU only) Loads a 3D Gaussian Splatting `.ply` scene.
+    *   `Load Asset…`: Opens a **folder picker** and loads the model inside it (see
+        [Asset folder convention](#asset-folder-convention)). The format is detected automatically:
+        a `.gltf` (with its `.bin`/textures) on either backend, or a `.ply` on **WebGPU** — which is
+        further inferred as a Gaussian **splat** or a triangle **mesh** from its header.
     *   `Reset Scene`: Resets the viewport to the default cube and reloads the original scene script.
+
+#### Asset folder convention
+
+`Load Asset…` selects a **directory**, not a single file — browsers can't read a picked file's
+sibling files, so a folder grant is what lets the companion assets (`.bin`, textures) load
+automatically. Therefore **each asset lives in its own folder**, containing exactly one primary
+model file (`.gltf`, `.glb`, or `.ply`) plus its dependencies (`.bin`, image textures).
+
+Folder structure example:
+```
+my-model/
+  my-model.gltf              (or .glb)
+  my-model.bin
+  textures/
+    my-model_diffuse.jpg
+    my-model_normal.png
+```
+
+Point `Load Asset…` at the folder and everything inside resolves automatically. The loader picks
+the first `.gltf`/`.glb`/`.ply` it finds, so keep one primary model per folder.
 *   **Shapes Menu**:
     *   `Textured` (Checkbox): When checked, any shape loaded from this menu will use the default checkerboard texture. This setting updates the current shape in real-time.
     *   `Cube` / `Sphere`: Loads a primitive cube or sphere into the scene.
@@ -95,7 +150,7 @@ The editor is divided into three main panels and a top menu bar.
 
 #### Triangle-Based Rendering
 
-1.  **Load a Model**: Use **File > Load Sample Model**, **File > Import .zip**, or **Shapes > Sphere** to get an object in the scene.
+1.  **Load a Model**: Use **File > Load Sample Model**, **File > Load Asset…** (pick a model folder), or **Shapes > Sphere** to get an object in the scene.
 2.  **Animate the Model**:
     *   In the Explorer, double-click `scene-script.js`.
     *   Modify the `update` function to change the model's rotation, position, or scale. For example, change `state.modelRotation += deltaTime * 0.5;` to `state.modelRotation += deltaTime * 2.0;` to make it spin faster.
@@ -109,7 +164,7 @@ The editor is divided into three main panels and a top menu bar.
 #### 3D Gaussian Splatting (WebGPU Only)
 
 1.  **Switch to WebGPU**: Open Settings → **Renderer** → **WebGPU** (requires Chrome/Edge 113+).
-2.  **Load a Splat Scene**: Use **File > Load Splat (.ply)** and select a `.ply` file from a 3DGS capture.
+2.  **Load a Splat Scene**: Use **File > Load Asset…** and pick a folder containing a 3DGS `.ply` capture (it's detected as a splat automatically).
 3.  **Inspect Geometry** (Optional):
     *   Open Settings → **Splat Debug** and cycle through:
         *   **Points**: See raw splat centers (validates loading & projection).
@@ -159,11 +214,43 @@ Hardware-accelerated ray tracing for photorealistic lighting, shadows, and refle
 
 Contributions are welcome! Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before participating. If you have a feature request, bug report, or want to contribute code, please feel free to open an issue or submit a pull request.
 
+### Contribution Workflow
+
 1.  Fork the Project
 2.  Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
 3.  Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
 4.  Push to the Branch (`git push origin feature/AmazingFeature`)
 5.  Open a Pull Request
+
+### For New Features: Include a Demo
+
+To help reviewers and future users understand your feature, **please include visual documentation** in your pull request:
+
+- **Screenshots**: Capture key states or results of your feature (use `npm run dev` to run the app and take screenshots)
+- **Short Video**: Record a 10-30 second video showing the feature in action. Tools:
+  - **macOS**: QuickTime Player (File → New Screen Recording) or ScreenFlow
+  - **Windows**: Windows 10/11 Game Bar (Win+G) or OBS Studio
+  - **Linux**: OBS Studio or SimpleScreenRecorder
+  
+  Export as **MP4** and add to your PR description or comments using GitHub's video upload.
+
+- **GIF for Quick Demos**: Use tools like [ffmpeg](https://ffmpeg.org/) or [gifshot](https://yahoo.github.io/gifshot/) to create animated GIFs (especially useful for small interactions)
+
+**Example PR Description:**
+```markdown
+## What's New
+Added real-time shader error highlighting in the editor.
+
+## Demo
+[Attach video or GIF showing the error highlighting in action]
+
+## Testing
+- Load a shader with syntax errors
+- Verify red underlines appear in the code
+- Fix the error and confirm highlighting clears
+```
+
+This helps reviewers understand the context faster and makes it easier for new contributors to see what's possible with Drishyam3D!
 
 ## License
 

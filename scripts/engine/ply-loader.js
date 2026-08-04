@@ -19,10 +19,10 @@ export const SH_REST_PER_CHANNEL = { 0: 0, 1: 3, 2: 8, 3: 15 };
 /**
  * Per-channel indices of the non-DC SH basis functions that are ODD in y.
  *
- * parsePly mirrors the scene about the y axis (see the Y-flip below). Spherical
- * harmonics are fit in the original space, so evaluating them against a view
- * direction in the mirrored space is wrong unless the basis functions that
- * change sign under y -> -y have their coefficients negated to match:
+ * `mirrorYInPlace` reflects a scene about the y axis. Spherical harmonics are fit
+ * in the original space, so evaluating them against a view direction in the
+ * mirrored space is wrong unless the basis functions that change sign under
+ * y -> -y have their coefficients negated to match:
  *   deg 1: Y(1,-1) ~ y                     -> index 0
  *   deg 2: Y(2,-2) ~ xy, Y(2,-1) ~ yz      -> indices 3, 4
  *   deg 3: Y(3,-3) ~ y(3x²-y²),
@@ -118,6 +118,10 @@ function parseHeader(bytes) {
  * activations applied (opacity=sigmoid, scale=exp, rotation normalized,
  * color from SH degree-0).
  *
+ * This is a pure parser: it preserves the file's coordinate frame verbatim and
+ * does NOT reorient the scene. Any axis flip is an explicit, optional step —
+ * see `mirrorYInPlace` — applied by the caller after parsing.
+ *
  * Non-DC spherical harmonics (`f_rest_*`) are read when present. In the file they
  * are channel-major (`f_rest_0..14` = R, `15..29` = G, `30..44` = B for degree 3);
  * `shCoeffs` re-interleaves them coefficient-major as consecutive rgb triples so
@@ -172,12 +176,9 @@ export function parsePly(arrayBuffer) {
     // Resolve the DataView accessors once, in output order (coefficient-major
     // rgb triples), instead of rebuilding `f_rest_N` strings per vertex.
     const shReaders = [];
-    const shSigns = [];
     for (let k = 0; k < shPerChannel; k++) {
-        const sign = SH_REST_FLIP_Y.has(k) ? -1 : 1;
         for (let c = 0; c < 3; c++) {
             shReaders.push(offsets[`f_rest_${c * restPerChannel + k}`]);
-            shSigns.push(sign);
         }
     }
     const shStride = shPerChannel * 3;
@@ -191,11 +192,11 @@ export function parsePly(arrayBuffer) {
         const x = has('x') ? read(base, 'x') : 0;
         const y = has('y') ? read(base, 'y') : 0;
         const z = has('z') ? read(base, 'z') : 0;
-        // Flip Y axis: standard 3DGS scenes are Y-up, but we need to handle inverted captures.
+        // Preserve the file's coordinate frame verbatim (see mirrorYInPlace for the flip).
         positions[i * 3 + 0] = x;
-        positions[i * 3 + 1] = -y;
+        positions[i * 3 + 1] = y;
         positions[i * 3 + 2] = z;
-        cx += x; cy += -y; cz += z;
+        cx += x; cy += y; cz += z;
 
         // Color from SH degree-0 DC term (default mid-grey if absent).
         colors[i * 3 + 0] = has('f_dc_0') ? 0.5 + SH_C0 * read(base, 'f_dc_0') : 0.5;
@@ -230,12 +231,12 @@ export function parsePly(arrayBuffer) {
         rotations[i * 4 + 2] = qy;
         rotations[i * 4 + 3] = qz;
 
-        // SH rest terms, sign-corrected for the Y-flip above.
+        // SH rest terms, verbatim (mirrorYInPlace sign-corrects them if flipped).
         if (shCoeffs) {
             const shBase = i * shStride;
             for (let n = 0; n < shStride; n++) {
                 const p = shReaders[n];
-                shCoeffs[shBase + n] = shSigns[n] * view[p.get](base + p.off, littleEndian);
+                shCoeffs[shBase + n] = view[p.get](base + p.off, littleEndian);
             }
         }
     }
@@ -258,4 +259,54 @@ export function parsePly(arrayBuffer) {
         positions, colors, opacities, scales, rotations,
         count: vertexCount, shCoeffs, shDegree, bounds,
     };
+}
+
+/**
+ * Reflects a parsed splat cloud about the XZ plane (y -> -y), in place.
+ *
+ * This is the optional reorientation kept out of `parsePly` so the parser stays a
+ * pure passthrough. A reflection is not a rotation, so it must be applied
+ * consistently to every orientation-bearing quantity or the gaussians end up
+ * inconsistent with their positions (the bug that made mirrored asymmetric scenes
+ * look scrambled):
+ *   - positions:   y -> -y
+ *   - rotations:   mirroring a rotation about the XZ plane conjugates the
+ *                  quaternion by a 180° y-rotation, i.e. (w,x,y,z) -> (w,-x,y,-z).
+ *                  This makes each gaussian's covariance Σ' = M·Σ·Mᵀ (M=diag(1,-1,1)).
+ *   - SH rest:     negate the basis functions that are odd in y (SH_REST_FLIP_Y),
+ *                  so view-dependent colour matches the mirrored view direction.
+ *   - bounds:      the center's y flips; the radius is unchanged.
+ *
+ * The transform is its own inverse, so callers can toggle it by re-applying.
+ *
+ * @param {ReturnType<typeof parsePly>} parsed
+ * @returns {typeof parsed} the same object, mutated.
+ */
+export function mirrorYInPlace(parsed) {
+    const { positions, rotations, shCoeffs, shDegree, count, bounds } = parsed;
+
+    for (let i = 0; i < count; i++) {
+        positions[i * 3 + 1] = -positions[i * 3 + 1];
+        // (w,x,y,z) -> (w,-x,y,-z); qw sign (canonical qw>=0) is preserved.
+        rotations[i * 4 + 1] = -rotations[i * 4 + 1];
+        rotations[i * 4 + 3] = -rotations[i * 4 + 3];
+    }
+
+    if (shCoeffs) {
+        const shPerChannel = SH_REST_PER_CHANNEL[shDegree];
+        const shStride = shPerChannel * 3;
+        for (let i = 0; i < count; i++) {
+            const shBase = i * shStride;
+            for (const k of SH_REST_FLIP_Y) {
+                if (k >= shPerChannel) continue;
+                shCoeffs[shBase + k * 3 + 0] = -shCoeffs[shBase + k * 3 + 0];
+                shCoeffs[shBase + k * 3 + 1] = -shCoeffs[shBase + k * 3 + 1];
+                shCoeffs[shBase + k * 3 + 2] = -shCoeffs[shBase + k * 3 + 2];
+            }
+        }
+    }
+
+    if (bounds) bounds.center[1] = -bounds.center[1];
+
+    return parsed;
 }

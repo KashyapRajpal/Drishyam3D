@@ -7,8 +7,8 @@
 import { Camera } from './camera.js';
 import { compileUserScript } from './script-runtime.js';
 import { generateCubeData, generateSphereData, resolveTextureUrl } from './geometry.js';
-import { initWebGPU, createRenderPipeline, createVertexBuffer, createIndexBuffer, createTextureFromUrl } from './webgpu-helpers.js';
-import { parsePly } from './ply-loader.js';
+import { initWebGPU, createRenderPipeline, createVertexBuffer, createIndexBuffer, createTextureFromUrl, createTextureFromImageBitmap } from './webgpu-helpers.js';
+import { parsePly, mirrorYInPlace } from './ply-loader.js';
 import {
     packSplats,
     createSplatStorageBuffer,
@@ -29,6 +29,7 @@ export function buildDrawableFromData(device, data, texture = null, name = 'draw
         kind: 'mesh',
         texture,
         vertexCount: data.vertexCount,
+        indexFormat: data.indexFormat ?? 'uint16',
         _debug: { name },
     };
 }
@@ -132,25 +133,29 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
      * @returns {{ kind: 'splat', storageBuffer: GPUBuffer, shBuffer: GPUBuffer,
      *            shDegree: number, count: number, bounds: object|null }}
      */
-    function loadSplats(arrayBuffer) {
-        const parsed = parsePly(arrayBuffer);
-        const packed = packSplats(parsed);
+    // Cached parsed cloud + whether it is currently mirrored, so the Y-flip can be
+    // toggled live without re-parsing the file. mirrorYInPlace is its own inverse.
+    let splatData = null;
+    let splatFlipped = false;
+
+    function packAndLoadSplat() {
+        const packed = packSplats(splatData);
         const storageBuffer = createSplatStorageBuffer(device, packed);
 
         const shDegree = fitShDegree(
-            parsed.shDegree,
-            parsed.count,
+            splatData.shDegree,
+            splatData.count,
             device.limits.maxStorageBufferBindingSize,
         );
-        if (shDegree < parsed.shDegree) {
+        if (shDegree < splatData.shDegree) {
             console.warn(
-                `Splat SH degree reduced ${parsed.shDegree} -> ${shDegree} to fit ` +
+                `Splat SH degree reduced ${splatData.shDegree} -> ${shDegree} to fit ` +
                 `maxStorageBufferBindingSize (${device.limits.maxStorageBufferBindingSize} bytes).`,
             );
         }
         const shBuffer = createShStorageBuffer(
             device,
-            packShCoeffs(parsed.shCoeffs, parsed.count, parsed.shDegree, shDegree),
+            packShCoeffs(splatData.shCoeffs, splatData.count, splatData.shDegree, shDegree),
         );
 
         const drawable = {
@@ -158,11 +163,48 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
             storageBuffer,
             shBuffer,
             shDegree,
-            count: parsed.count,
-            bounds: parsed.bounds,
-            positions: parsed.positions, // world-space centers, for the Culled reduction's grid
+            count: splatData.count,
+            bounds: splatData.bounds,
+            positions: splatData.positions, // world-space centers, for the Culled reduction's grid
             _debug: { name: 'splat cloud' },
         };
+        scene.loadGeometry(drawable); // releases the previous drawable's GPU buffers
+        return drawable;
+    }
+
+    /**
+     * Parses and loads a 3DGS `.ply`.
+     * @param {ArrayBuffer} arrayBuffer
+     * @param {{ flipY?: boolean }} [opts] flipY reflects the scene about the XZ
+     *        plane (default true — most captures are stored y-down).
+     */
+    function loadSplats(arrayBuffer, { flipY = true } = {}) {
+        splatData = parsePly(arrayBuffer);
+        splatFlipped = false;
+        if (flipY) {
+            mirrorYInPlace(splatData);
+            splatFlipped = true;
+        }
+        return packAndLoadSplat();
+    }
+
+    /** Toggle the Y-flip on the loaded splat cloud in place, re-packing GPU buffers. */
+    function setSplatFlipY(flipY) {
+        const want = !!flipY;
+        if (!splatData || want === splatFlipped) return null;
+        mirrorYInPlace(splatData);
+        splatFlipped = want;
+        return packAndLoadSplat();
+    }
+
+    /**
+     * Loads a parsed triangle mesh (see mesh-ply-loader.js) as a textured drawable.
+     * @param {{ meshData: object, textureBitmap?: ImageBitmap|null }} args
+     */
+    function loadMesh({ meshData, textureBitmap = null }) {
+        const texture = textureBitmap ? createTextureFromImageBitmap(device, textureBitmap) : null;
+        const drawable = buildDrawableFromData(device, meshData, texture, meshData.name || 'mesh');
+        drawable.bounds = meshData.bounds;
         scene.loadGeometry(drawable);
         return drawable;
     }
@@ -204,7 +246,7 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
     return {
         device, scene, camera,
         setShaders, setScriptSource,
-        loadSplats, setSplatDebugMode, setSplatShDegree, setSplatRenderMode, setSplatReduction,
+        loadSplats, setSplatFlipY, loadMesh, setSplatDebugMode, setSplatShDegree, setSplatRenderMode, setSplatReduction,
         getStats: () => scene.getStats(),
         destroy: () => scene.destroy(),
     };

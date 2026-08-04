@@ -68,14 +68,17 @@ export class Camera {
 
 
     updateViewMatrix() {
+        // Orbit the eye around `target` (not the origin), so off-origin models
+        // — e.g. scanned meshes whose centers sit far from (0,0,0) — stay framed.
+        const t = this.target || [0, 0, 0];
         const eye = [
-            this.zoom * Math.sin(this.rotation.y) * Math.cos(this.rotation.x),
-            this.zoom * Math.sin(this.rotation.x),
-            this.zoom * Math.cos(this.rotation.y) * Math.cos(this.rotation.x)
+            t[0] + this.zoom * Math.sin(this.rotation.y) * Math.cos(this.rotation.x),
+            t[1] + this.zoom * Math.sin(this.rotation.x),
+            t[2] + this.zoom * Math.cos(this.rotation.y) * Math.cos(this.rotation.x)
         ];
 
         this.eye = eye;
-        this.viewMatrix = createLookAtMatrix(eye, this.target, this.up);
+        this.viewMatrix = createLookAtMatrix(eye, t, this.up);
     }
 
     getViewMatrix() {

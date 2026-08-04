@@ -1,5 +1,5 @@
 import {
-  parsePly, sigmoid, SH_C0, SH_REST_FLIP_Y, shDegreeFromRestCount,
+  parsePly, mirrorYInPlace, sigmoid, SH_C0, SH_REST_FLIP_Y, shDegreeFromRestCount,
 } from '../scripts/engine/ply-loader.js';
 
 // Standard 3DGS vertex properties used by the synthetic fixture (all float32).
@@ -64,13 +64,13 @@ describe('parsePly', () => {
     rot_0: 0, rot_1: 0, rot_2: 0, rot_3: 2, // normalize -> (0,0,0,1)
   };
 
-  test('parses count, positions, and bounds (with Y-flip)', () => {
+  test('parses count, positions, and bounds verbatim (no reorientation)', () => {
     const result = parsePly(buildPly([v0, v1]));
     expect(result.count).toBe(2);
-    // Y-coordinates are flipped: y -> -y
-    expect(Array.from(result.positions)).toEqual([1, -2, 3, -1, 2, -3]);
+    // The parser preserves the file's coordinate frame exactly.
+    expect(Array.from(result.positions)).toEqual([1, 2, 3, -1, -2, -3]);
 
-    // center = midpoint = origin (after Y-flip); radius = distance from origin to either point.
+    // center = midpoint = origin; radius = distance from origin to either point.
     expect(result.bounds.center).toEqual([0, 0, 0]);
     expect(result.bounds.radius).toBeCloseTo(Math.hypot(1, 2, 3), 5);
   });
@@ -167,26 +167,12 @@ describe('parsePly spherical harmonics', () => {
     const { shDegree, shCoeffs } = parsePly(buildPly([vertexWithRest(9)], { props }));
     expect(shDegree).toBe(1);
 
-    // Coefficient 0 is odd in y, so its rgb triple is negated by the Y-flip fix;
-    // coefficients 1 and 2 are even and pass through unchanged.
+    // The parser passes SH coefficients through verbatim (mirrorYInPlace handles signs).
     expect(Array.from(shCoeffs)).toEqual([
-      -1, -4, -7, // coeff 0 = (R0,G0,B0) negated
-       2,  5,  8, // coeff 1 = (R1,G1,B1)
-       3,  6,  9, // coeff 2 = (R2,G2,B2)
+      1, 4, 7, // coeff 0 = (R0,G0,B0)
+      2, 5, 8, // coeff 1 = (R1,G1,B1)
+      3, 6, 9, // coeff 2 = (R2,G2,B2)
     ]);
-  });
-
-  test('negates exactly the SH basis functions that are odd in y', () => {
-    const props = propsWithRest(45);
-    const { shCoeffs } = parsePly(buildPly([vertexWithRest(45)], { props }));
-
-    for (let k = 0; k < 15; k++) {
-      // Red channel of coefficient k is f_rest_k, whose stored value is k+1.
-      const expected = SH_REST_FLIP_Y.has(k) ? -(k + 1) : (k + 1);
-      expect(shCoeffs[k * 3]).toBeCloseTo(expected, 6);
-    }
-    // Guard the exact flip set, since a wrong one silently mis-shades the scene.
-    expect([...SH_REST_FLIP_Y].sort((a, b) => a - b)).toEqual([0, 3, 4, 8, 9, 10]);
   });
 
   test('keeps only the highest fully-covered degree when extra coefficients exist', () => {
@@ -195,8 +181,8 @@ describe('parsePly spherical harmonics', () => {
     const { shDegree, shCoeffs } = parsePly(buildPly([vertexWithRest(30)], { props }));
     expect(shDegree).toBe(2);
     expect(shCoeffs).toHaveLength(8 * 3);
-    // Green channel of coefficient 0 is f_rest_10 (= 11), negated as an odd-in-y term.
-    expect(shCoeffs[1]).toBeCloseTo(-11, 6);
+    // Green channel of coefficient 0 is f_rest_10 (= 11), passed through verbatim.
+    expect(shCoeffs[1]).toBeCloseTo(11, 6);
   });
 
   test('keeps per-splat SH blocks independent', () => {
@@ -207,7 +193,64 @@ describe('parsePly spherical harmonics', () => {
 
     const { shCoeffs } = parsePly(buildPly([a, b], { props }));
     expect(shCoeffs).toHaveLength(2 * 9);
-    expect(shCoeffs[0]).toBeCloseTo(-1, 6);   // splat 0, coeff 0, red
-    expect(shCoeffs[9]).toBeCloseTo(-10, 6);  // splat 1, coeff 0, red
+    expect(shCoeffs[0]).toBeCloseTo(1, 6);   // splat 0, coeff 0, red
+    expect(shCoeffs[9]).toBeCloseTo(10, 6);  // splat 1, coeff 0, red
+  });
+});
+
+describe('mirrorYInPlace', () => {
+  function vertexWithRest(restCount, extra = {}) {
+    const v = { x: 0, y: 0, z: 0, rot_0: 1, ...extra };
+    for (let i = 0; i < restCount; i++) v[`f_rest_${i}`] = i + 1;
+    return v;
+  }
+
+  test('reflects positions and bounds about the XZ plane (y -> -y)', () => {
+    const parsed = parsePly(buildPly([
+      { x: 1, y: 2, z: 3, rot_0: 1 },
+      { x: -1, y: -4, z: -3, rot_0: 1 },
+    ]));
+    mirrorYInPlace(parsed);
+    expect(Array.from(parsed.positions)).toEqual([1, -2, 3, -1, 4, -3]);
+    // center y flips; radius is unchanged.
+    expect(parsed.bounds.center[1]).toBeCloseTo(-((2 + -4) / 2), 6);
+  });
+
+  test('mirrors gaussian rotations by negating qx and qz', () => {
+    // rot (1,1,1,1) normalizes to (0.5, 0.5, 0.5, 0.5).
+    const parsed = parsePly(buildPly([
+      { x: 0, y: 0, z: 0, rot_0: 1, rot_1: 1, rot_2: 1, rot_3: 1 },
+    ]));
+    mirrorYInPlace(parsed);
+    // (w,x,y,z) -> (w,-x,y,-z)
+    expect(parsed.rotations[0]).toBeCloseTo(0.5, 6);   // w unchanged
+    expect(parsed.rotations[1]).toBeCloseTo(-0.5, 6);  // x negated
+    expect(parsed.rotations[2]).toBeCloseTo(0.5, 6);   // y unchanged
+    expect(parsed.rotations[3]).toBeCloseTo(-0.5, 6);  // z negated
+  });
+
+  test('negates exactly the SH basis functions that are odd in y', () => {
+    const props = propsWithRest(45);
+    const parsed = parsePly(buildPly([vertexWithRest(45)], { props }));
+    mirrorYInPlace(parsed);
+
+    for (let k = 0; k < 15; k++) {
+      // Red channel of coefficient k is f_rest_k, whose stored value is k+1.
+      const expected = SH_REST_FLIP_Y.has(k) ? -(k + 1) : (k + 1);
+      expect(parsed.shCoeffs[k * 3]).toBeCloseTo(expected, 6);
+    }
+    // Guard the exact flip set, since a wrong one silently mis-shades the scene.
+    expect([...SH_REST_FLIP_Y].sort((a, b) => a - b)).toEqual([0, 3, 4, 8, 9, 10]);
+  });
+
+  test('is its own inverse', () => {
+    const props = propsWithRest(9);
+    const original = parsePly(buildPly([vertexWithRest(9, { x: 1, y: 2, z: 3, rot_1: 1, rot_3: 1 })], { props }));
+    const roundTrip = parsePly(buildPly([vertexWithRest(9, { x: 1, y: 2, z: 3, rot_1: 1, rot_3: 1 })], { props }));
+    mirrorYInPlace(roundTrip);
+    mirrorYInPlace(roundTrip);
+    expect(Array.from(roundTrip.positions)).toEqual(Array.from(original.positions));
+    expect(Array.from(roundTrip.rotations)).toEqual(Array.from(original.rotations));
+    expect(Array.from(roundTrip.shCoeffs)).toEqual(Array.from(original.shCoeffs));
   });
 });
