@@ -160,7 +160,7 @@ export async function loadSplatFile({ engine, file, flipY = true }) {
         throw new Error('Splat loading requires the WebGPU backend.');
     }
     const arrayBuffer = await file.arrayBuffer();
-    const drawable = engine.loadSplats(arrayBuffer, { flipY });
+    const drawable = await engine.loadSplats(arrayBuffer, { flipY });
     frameCamera(engine.camera, drawable);
     return drawable;
 }

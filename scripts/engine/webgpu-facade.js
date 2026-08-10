@@ -8,9 +8,7 @@ import { Camera } from './camera.js';
 import { compileUserScript } from './script-runtime.js';
 import { generateCubeData, generateSphereData, resolveTextureUrl } from './geometry.js';
 import { initWebGPU, createRenderPipeline, createVertexBuffer, createIndexBuffer, createTextureFromUrl, createTextureFromImageBitmap } from './webgpu-helpers.js';
-import { parsePly, mirrorYInPlace } from './ply-loader.js';
 import {
-    packSplats,
     createSplatStorageBuffer,
     createShStorageBuffer,
     packShCoeffs,
@@ -133,29 +131,40 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
      * @returns {{ kind: 'splat', storageBuffer: GPUBuffer, shBuffer: GPUBuffer,
      *            shDegree: number, count: number, bounds: object|null }}
      */
-    // Cached parsed cloud + whether it is currently mirrored, so the Y-flip can be
-    // toggled live without re-parsing the file. mirrorYInPlace is its own inverse.
-    let splatData = null;
-    let splatFlipped = false;
+    // Off-main-thread parse/mirror/pack. The client owns a Worker (with a
+    // synchronous fallback) that retains the parsed cloud, so both the initial
+    // load and the live Y-flip toggle re-pack without blocking the main thread.
+    // Lazily imported so the `import.meta`-bearing worker module never enters
+    // Jest's babel graph (cf. geometry.js's `new Function` dodge).
+    let splatLoader = null;
+    async function getSplatLoader() {
+        if (!splatLoader) {
+            const mod = await import('./splat-loader-client.js');
+            splatLoader = mod.createSplatLoaderClient();
+        }
+        return splatLoader;
+    }
 
-    function packAndLoadSplat() {
-        const packed = packSplats(splatData);
-        const storageBuffer = createSplatStorageBuffer(device, packed);
+    // Build the GPU-side splat drawable from a worker payload. GPU buffer
+    // creation must stay on the main thread (no device inside the worker), and
+    // the SH degree can only be fitted here since it depends on device limits.
+    function buildSplatDrawable(payload) {
+        const storageBuffer = createSplatStorageBuffer(device, payload.packed);
 
         const shDegree = fitShDegree(
-            splatData.shDegree,
-            splatData.count,
+            payload.shDegree,
+            payload.count,
             device.limits.maxStorageBufferBindingSize,
         );
-        if (shDegree < splatData.shDegree) {
+        if (shDegree < payload.shDegree) {
             console.warn(
-                `Splat SH degree reduced ${splatData.shDegree} -> ${shDegree} to fit ` +
+                `Splat SH degree reduced ${payload.shDegree} -> ${shDegree} to fit ` +
                 `maxStorageBufferBindingSize (${device.limits.maxStorageBufferBindingSize} bytes).`,
             );
         }
         const shBuffer = createShStorageBuffer(
             device,
-            packShCoeffs(splatData.shCoeffs, splatData.count, splatData.shDegree, shDegree),
+            packShCoeffs(payload.shCoeffs, payload.count, payload.shDegree, shDegree),
         );
 
         const drawable = {
@@ -163,9 +172,9 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
             storageBuffer,
             shBuffer,
             shDegree,
-            count: splatData.count,
-            bounds: splatData.bounds,
-            positions: splatData.positions, // world-space centers, for the Culled reduction's grid
+            count: payload.count,
+            bounds: payload.bounds,
+            positions: payload.positions, // world-space centers, for the Culled reduction's grid
             _debug: { name: 'splat cloud' },
         };
         scene.loadGeometry(drawable); // releases the previous drawable's GPU buffers
@@ -173,28 +182,24 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
     }
 
     /**
-     * Parses and loads a 3DGS `.ply`.
+     * Parses and loads a 3DGS `.ply` (parsing runs in a Web Worker).
      * @param {ArrayBuffer} arrayBuffer
      * @param {{ flipY?: boolean }} [opts] flipY reflects the scene about the XZ
      *        plane (default true — most captures are stored y-down).
+     * @returns {Promise<object>} the loaded splat drawable.
      */
-    function loadSplats(arrayBuffer, { flipY = true } = {}) {
-        splatData = parsePly(arrayBuffer);
-        splatFlipped = false;
-        if (flipY) {
-            mirrorYInPlace(splatData);
-            splatFlipped = true;
-        }
-        return packAndLoadSplat();
+    async function loadSplats(arrayBuffer, { flipY = true } = {}) {
+        const loader = await getSplatLoader();
+        const payload = await loader.load(arrayBuffer, flipY);
+        return buildSplatDrawable(payload);
     }
 
-    /** Toggle the Y-flip on the loaded splat cloud in place, re-packing GPU buffers. */
-    function setSplatFlipY(flipY) {
-        const want = !!flipY;
-        if (!splatData || want === splatFlipped) return null;
-        mirrorYInPlace(splatData);
-        splatFlipped = want;
-        return packAndLoadSplat();
+    /** Toggle the Y-flip on the loaded splat cloud, re-packing GPU buffers off-thread. */
+    async function setSplatFlipY(flipY) {
+        const loader = await getSplatLoader();
+        const payload = await loader.setFlip(flipY);
+        if (!payload) return null;
+        return buildSplatDrawable(payload);
     }
 
     /**
@@ -248,6 +253,9 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
         setShaders, setScriptSource,
         loadSplats, setSplatFlipY, loadMesh, setSplatDebugMode, setSplatShDegree, setSplatRenderMode, setSplatReduction,
         getStats: () => scene.getStats(),
-        destroy: () => scene.destroy(),
+        destroy: () => {
+            if (splatLoader) splatLoader.destroy();
+            scene.destroy();
+        },
     };
 }

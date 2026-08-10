@@ -295,7 +295,8 @@ export default function App(){
     if (!engineReady) return
     const engine = engineRef.current
     if (engine && typeof engine.setSplatFlipY === 'function') {
-      engine.setSplatFlipY(flipSplatY)
+      // Fire-and-forget: re-packs off-thread; surface failures without unhandled rejections.
+      Promise.resolve(engine.setSplatFlipY(flipSplatY)).catch((err) => console.error('setSplatFlipY failed', err))
     }
   }, [engineReady, flipSplatY, splatLoaded])
 

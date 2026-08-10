@@ -85,7 +85,7 @@ await page.waitForFunction(() => !!window.__DRISHYAM_ENGINE, null, { timeout: 30
 await page.evaluate(async () => {
     const e = window.__DRISHYAM_ENGINE;
     const buf = await (await fetch('/__visual_ply')).arrayBuffer();
-    e.loadSplats(buf);
+    await e.loadSplats(buf);
 });
 await page.waitForTimeout(config.settleMs);
 
