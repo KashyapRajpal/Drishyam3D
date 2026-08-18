@@ -14,11 +14,15 @@ import { createIdentityMatrix, createPerspectiveMatrix } from './matrix.js';
 import { MeshRenderer } from './renderers/mesh-renderer.js';
 import { SplatRenderer } from './renderers/splat-renderer.js';
 import { SplatTileRenderer } from './renderers/splat-tile-renderer.js';
+import { RayTraceRenderer } from './renderers/raytrace-renderer.js';
 import { GpuTimer } from './gpu-timer.js';
 
 export function createWebGPUScene(device, context, format, canvas, camera) {
-    let drawable = null;
+    let rasterDrawable = null;
+    let rayDrawable = null;
+    let renderMode = 'raster';
     let active = true; // Set to false permanently by destroy().
+    let destroyed = false;
     let paused = false;
     let then = 0;
     let fpsAccum = 0, fpsCount = 0, displayFps = 0, displayMs = 0;
@@ -35,28 +39,48 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
     const meshRenderer = new MeshRenderer(device, format);
     const splatRenderer = new SplatRenderer(device, format);
     const splatTileRenderer = new SplatTileRenderer(device, format);
+    const rayTraceRenderer = new RayTraceRenderer(device, format);
+    let rayShaderReady = false;
     let activeSplatRenderer = splatRenderer; // Toggle between instanced and tile modes
     const renderers = new Map([
         ['mesh', meshRenderer],
         ['splat', null], // Resolved via activeSplatRenderer
     ]);
 
-    function rendererFor(target) {
+    function rendererFor(target, requestedMode = renderMode) {
         if (!target) return null;
+        if (requestedMode === 'raytrace-gpu') return target.kind === 'raytrace' ? rayTraceRenderer : null;
         const kind = target.kind ?? 'mesh';
         if (kind === 'splat') return activeSplatRenderer;
         return renderers.get(kind) ?? null;
     }
 
-    function getDrawable() { return drawable; }
+    function getDrawable() {
+        return renderMode === 'raytrace-gpu' ? rayDrawable : rasterDrawable;
+    }
 
-    function setDrawable(next) {
-        if (next === drawable) return;
-        const previous = drawable;
-        drawable = next;
-        if (previous) rendererFor(previous)?.releaseDrawable(previous);
-        rendererFor(drawable)?.prepare(drawable);
+    function setRasterDrawable(next) {
+        if (next === rasterDrawable) return;
+        const previous = rasterDrawable;
+        rasterDrawable = next;
+        if (previous) rendererFor(previous, 'raster')?.releaseDrawable(previous);
+        if (renderMode === 'raster') rendererFor(rasterDrawable, 'raster')?.prepare(rasterDrawable);
         forceUpdate({ reinitScript: true });
+    }
+
+    function setRayDrawable(next) {
+        if (next === rayDrawable) return;
+        const previous = rayDrawable;
+        rayDrawable = next;
+        if (previous) rayTraceRenderer.releaseDrawable(previous);
+        if (renderMode === 'raytrace-gpu') rayTraceRenderer.prepare(rayDrawable);
+        forceUpdate();
+    }
+
+    function unsupportedMode(message) {
+        const error = new Error(message);
+        error.code = 'UNSUPPORTED_RENDER_MODE';
+        return error;
     }
 
     function resizeCanvas() {
@@ -139,7 +163,7 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
         // Fit near/far to the scene's scale so large scanned meshes (coords in the
         // hundreds) aren't clipped by a fixed 100-unit far plane; small scenes
         // (cube/sphere/splat, ~unit-scale) keep the original 0.1 / 100 range.
-        const boundsRadius = drawable?.bounds?.radius ?? 0;
+        const boundsRadius = current?.bounds?.radius ?? 0;
         const zFar = Math.max(100, (camera.zoom + boundsRadius) * 2 + 10);
         const zNear = Math.max(0.1, zFar / 1000);
         const projectionMatrix = createPerspectiveMatrix(fieldOfView, aspect, zNear, zFar);
@@ -149,7 +173,9 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
 
         // The user script mutates sceneState.modelViewMatrix as the model matrix.
         sceneState.modelViewMatrix = createIdentityMatrix();
-        try { userScript.update(sceneState, deltaTime); } catch (e) { /* ignore */ }
+        if (renderMode === 'raster') {
+            try { userScript.update(sceneState, deltaTime); } catch (e) { /* ignore */ }
+        }
 
         const encoder = device.createCommandEncoder();
         const targetView = context.getCurrentTexture().createView();
@@ -202,15 +228,15 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
             const nextRenderer = mode === 'tile' ? splatTileRenderer : splatRenderer;
             if (activeSplatRenderer === nextRenderer) return;
             activeSplatRenderer = nextRenderer;
-            if (drawable?.kind === 'splat') {
-                activeSplatRenderer.prepare(drawable);
+            if (rasterDrawable?.kind === 'splat') {
+                activeSplatRenderer.prepare(rasterDrawable);
             }
             forceUpdate();
         },
 
         updatePipeline(newPipeline) {
             meshRenderer.setPipeline(newPipeline);
-            rendererFor(drawable)?.prepare(drawable);
+            if (renderMode === 'raster') rendererFor(rasterDrawable, 'raster')?.prepare(rasterDrawable);
             forceUpdate();
         },
 
@@ -222,13 +248,13 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
         setSplatShaders(splatWgsl, sortWgsl, cullWgsl, radixWgsl) {
             if (!splatWgsl || !sortWgsl) return;
             splatRenderer.setShaders(splatWgsl, sortWgsl, cullWgsl, radixWgsl);
-            if (drawable?.kind === 'splat') splatRenderer.prepare(drawable);
+            if (rasterDrawable?.kind === 'splat') splatRenderer.prepare(rasterDrawable);
             forceUpdate();
         },
 
         setSplatReduction(mode) {
             splatRenderer.setReduction(mode);
-            if (drawable?.kind === 'splat') splatRenderer.prepare(drawable);
+            if (rasterDrawable?.kind === 'splat') splatRenderer.prepare(rasterDrawable);
             forceUpdate();
         },
 
@@ -242,8 +268,8 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
         setTileShaders(blitWgsl, tileRenderWgsl) {
             if (!blitWgsl || !tileRenderWgsl) return;
             splatTileRenderer.setShaders(blitWgsl, tileRenderWgsl);
-            if (drawable?.kind === 'splat' && activeSplatRenderer === splatTileRenderer) {
-                splatTileRenderer.prepare(drawable);
+            if (rasterDrawable?.kind === 'splat' && activeSplatRenderer === splatTileRenderer) {
+                splatTileRenderer.prepare(rasterDrawable);
             }
             forceUpdate();
         },
@@ -257,6 +283,53 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
             splatRenderer.setMaxShDegree(degree);
             forceUpdate();
         },
+
+        setRayTracingShader(wgslSource) {
+            if (!wgslSource) return false;
+            rayTraceRenderer.setShader(wgslSource);
+            rayShaderReady = true;
+            if (renderMode === 'raytrace-gpu' && rayDrawable) rayTraceRenderer.prepare(rayDrawable);
+            forceUpdate();
+            return true;
+        },
+
+        setRenderMode(nextMode) {
+            if (nextMode !== 'raster' && nextMode !== 'raytrace-gpu') {
+                throw unsupportedMode(`Unsupported WebGPU render mode: ${nextMode}`);
+            }
+            if (nextMode === renderMode) return;
+            if (nextMode === 'raytrace-gpu') {
+                if (!rayShaderReady) throw unsupportedMode('GPU ray tracing shader is unavailable.');
+                if (!rayDrawable) throw unsupportedMode('No ray-traceable scene is loaded.');
+                rayTraceRenderer.prepare(rayDrawable);
+            } else if (rasterDrawable) {
+                rendererFor(rasterDrawable, 'raster')?.prepare(rasterDrawable);
+            }
+            renderMode = nextMode;
+            then = 0;
+            forceUpdate();
+        },
+
+        getRenderMode: () => renderMode,
+
+        setRayTracingSettings(partial) {
+            rayTraceRenderer.setSettings(partial);
+            forceUpdate();
+        },
+
+        resetRayAccumulation() {
+            rayTraceRenderer.resetAccumulation();
+            forceUpdate();
+        },
+
+        updateRayTlasAndInstances(target, packed, ranges) {
+            if (target !== rayDrawable) throw new Error('TLAS update target is not the retained ray drawable.');
+            rayTraceRenderer.updateTlasAndInstances(target, packed, ranges);
+            forceUpdate();
+        },
+
+        readRayAccumulation: () => rayTraceRenderer.readAccumulation(),
+        readRayDiagnostics: () => rayTraceRenderer.readDiagnostics(),
 
         /**
          * Measures end-to-end GPU cost per frame by rendering frames back to back
@@ -276,7 +349,7 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
          * @returns {Promise<{frames:number, medianMs:number, meanMs:number, minMs:number, maxMs:number}|null>}
          */
         async measureFrameCost({ frames = 20, warmup = 3 } = {}) {
-            if (!drawable || !rendererFor(drawable)) return null;
+            if (!getDrawable() || !rendererFor(getDrawable())) return null;
             const wasActive = active;
             active = false; // suspend the rAF loop
             try {
@@ -310,17 +383,33 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
         },
 
         loadGeometry(newDrawable) {
-            setDrawable(newDrawable);
+            setRasterDrawable(newDrawable);
+        },
+
+        loadRayGeometry(newDrawable) {
+            setRayDrawable(newDrawable);
         },
 
         getDrawable,
+        getRasterDrawable: () => rasterDrawable,
+        getRayDrawable: () => rayDrawable,
 
         getStats() {
+            const drawable = getDrawable();
+            if (renderMode === 'raytrace-gpu') {
+                return {
+                    ...rayTraceRenderer.getStats(),
+                    fps: displayFps,
+                    frameMs: displayMs,
+                    passMs: gpuTimer.getDurations(),
+                };
+            }
             const isSplat = drawable?.kind === 'splat';
             const info = isSplat ? activeSplatRenderer.getReductionInfo?.() : null;
             const total = isSplat ? drawable.count : 0;
             return {
                 backend: 'webgpu',
+                renderMode,
                 fps: displayFps,
                 frameMs: displayMs,
                 drawableKind: drawable?.kind ?? 'none',
@@ -335,14 +424,19 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
         },
 
         destroy() {
+            if (destroyed) return;
+            destroyed = true;
             active = false;
             paused = true;
-            if (drawable) rendererFor(drawable)?.releaseDrawable(drawable);
+            if (rasterDrawable) rendererFor(rasterDrawable, 'raster')?.releaseDrawable(rasterDrawable);
+            if (rayDrawable) rayTraceRenderer.releaseDrawable(rayDrawable);
             meshRenderer.destroy();
             splatRenderer.destroy();
             splatTileRenderer.destroy();
+            rayTraceRenderer.destroy();
             gpuTimer.destroy();
-            drawable = null;
+            rasterDrawable = null;
+            rayDrawable = null;
         },
     };
 }

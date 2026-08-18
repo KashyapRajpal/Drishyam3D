@@ -15,6 +15,45 @@ import {
     fitShDegree,
 } from './splat-helpers.js';
 import { createWebGPUScene } from './webgpu-scene.js';
+import { buildAccelerationStructures, updateAccelerationStructures } from './raytracing/acceleration/acceleration-structure.js';
+import { createCornellBoxScene } from './raytracing/core/cornell-box.js';
+import { prepareRayScene } from './raytracing/core/ray-scene.js';
+import { packGpuScene, repackGpuTlasAndInstances } from './raytracing/gpu/gpu-scene-packer.js';
+
+const RAY_REVISION_FIELDS = Object.freeze([
+    'geometryRevision',
+    'instanceRevision',
+    'materialRevision',
+    'lightRevision',
+    'cameraRevision',
+    'settingsRevision',
+]);
+
+function normalizeRayRevisions(next = {}, previous = {}) {
+    return Object.fromEntries(RAY_REVISION_FIELDS.map((field) => {
+        const value = next[field] ?? previous[field] ?? 0;
+        if (!Number.isInteger(value) || value < 0) throw new Error(`${field} must be a non-negative integer.`);
+        return [field, value];
+    }));
+}
+
+function isPreparedRayScene(scene) {
+    return !!scene
+        && scene.geometries?.every((geometry) => geometry.bounds && geometry.positions instanceof Float32Array)
+        && scene.instances?.every((instance) => instance.inverseWorldMatrix?.length === 16)
+        && scene.bounds;
+}
+
+function cameraPoseFromRayScene(camera, sceneCamera) {
+    if (!sceneCamera) return;
+    const delta = sceneCamera.eye.map((value, axis) => value - sceneCamera.target[axis]);
+    const zoom = Math.hypot(...delta);
+    camera.target = [...sceneCamera.target];
+    camera.up = [...sceneCamera.up];
+    camera.minZoom = Math.max(0.1, zoom * 0.1);
+    camera.maxZoom = Math.max(20, zoom * 10);
+    camera.setPose(Math.asin(delta[1] / zoom), Math.atan2(delta[0], delta[2]), zoom);
+}
 
 export function buildDrawableFromData(device, data, texture = null, name = 'drawable') {
     return {
@@ -92,6 +131,9 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
     const { device, context, format } = gpuContext;
     const camera = new Camera(canvas, [0, 0, 5]);
     const scene  = createWebGPUScene(device, context, format, canvas, camera);
+    let rayState = null;
+    let rayTracingError = null;
+    let destroyed = false;
 
     // Load default cube geometry
     const cubeData = generateCubeData();
@@ -261,6 +303,79 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
         scene.setSplatSort(mode);
     }
 
+    /** Loads or revision-updates a backend-neutral prepared RayScene. */
+    function loadRayScene(sourceScene, { revisions: requestedRevisions } = {}) {
+        if (destroyed) throw new Error('WebGPU engine has been destroyed.');
+        const preparedScene = isPreparedRayScene(sourceScene) ? sourceScene : prepareRayScene(sourceScene);
+        const revisions = normalizeRayRevisions(requestedRevisions, rayState?.revisions);
+        const acceleration = rayState
+            ? updateAccelerationStructures(rayState.acceleration, preparedScene, revisions)
+            : buildAccelerationStructures(preparedScene, { revisions });
+
+        const canReuseStaticPacking = rayState
+            && revisions.geometryRevision === rayState.revisions.geometryRevision
+            && revisions.materialRevision === rayState.revisions.materialRevision
+            && preparedScene.geometries.length === rayState.preparedScene.geometries.length
+            && preparedScene.materials.length === rayState.preparedScene.materials.length
+            && preparedScene.geometries.every((geometry, index) => geometry === rayState.preparedScene.geometries[index])
+            && preparedScene.materials.every((material, index) => material === rayState.preparedScene.materials[index])
+            && acceleration.blases.every((blas, index) => blas === rayState.acceleration.blases[index]);
+        const revisionsChanged = rayState
+            && RAY_REVISION_FIELDS.some((field) => revisions[field] !== rayState.revisions[field]);
+
+        if (canReuseStaticPacking && !revisionsChanged) return rayState.drawable;
+
+        if (canReuseStaticPacking && revisions.instanceRevision !== rayState.revisions.instanceRevision) {
+            try {
+                const ranges = repackGpuTlasAndInstances(rayState.packedScene, preparedScene, acceleration);
+                Object.assign(rayState.drawable, { scene: preparedScene, acceleration, revisions });
+                scene.updateRayTlasAndInstances(rayState.drawable, rayState.packedScene, ranges);
+                rayState = { ...rayState, preparedScene, acceleration, revisions };
+                cameraPoseFromRayScene(camera, preparedScene.camera);
+                return rayState.drawable;
+            } catch (error) {
+                if (!/requires stable instance, node, and leaf counts/.test(error.message)) throw error;
+                // Instance add/remove shifts packed BLAS offsets; fall through to full replacement.
+            }
+        }
+
+        if (canReuseStaticPacking) {
+            Object.assign(rayState.drawable, { scene: preparedScene, acceleration, revisions });
+            rayState = { ...rayState, preparedScene, acceleration, revisions };
+            scene.resetRayAccumulation();
+            cameraPoseFromRayScene(camera, preparedScene.camera);
+            return rayState.drawable;
+        }
+
+        const packedScene = packGpuScene(preparedScene, acceleration);
+        const drawable = {
+            kind: 'raytrace',
+            scene: preparedScene,
+            acceleration,
+            revisions,
+            packedScene,
+            bounds: preparedScene.bounds,
+            _debug: { name: 'ray scene' },
+        };
+        rayState = { preparedScene, acceleration, revisions, packedScene, drawable };
+        scene.loadRayGeometry(drawable);
+        cameraPoseFromRayScene(camera, preparedScene.camera);
+        return drawable;
+    }
+
+    function loadCornellBox(options) {
+        return loadRayScene(createCornellBoxScene(), options);
+    }
+
+    async function setRenderMode(mode) {
+        scene.setRenderMode(mode);
+        return mode;
+    }
+
+    function setRayTracingSettings(partial) {
+        scene.setRayTracingSettings(partial);
+    }
+
     if (!shaderSources?.wgsl) {
         errorHandler(new Error('Missing WGSL shader source.'));
         return null;
@@ -278,6 +393,14 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
     if (shaderSources.blitWgsl && shaderSources.tileRenderWgsl) {
         scene.setTileShaders(shaderSources.blitWgsl, shaderSources.tileRenderWgsl);
     }
+    if (shaderSources.raytraceWgsl) {
+        try {
+            scene.setRayTracingShader(shaderSources.raytraceWgsl);
+        } catch (error) {
+            rayTracingError = error;
+            errorHandler(error);
+        }
+    }
     setScriptSource(scriptSource);
     scene.start();
 
@@ -285,14 +408,29 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
         device, scene, camera,
         setShaders, setScriptSource,
         loadSplats, setSplatFlipY, loadMesh, setSplatDebugMode, setSplatShDegree, setSplatRenderMode, setSplatReduction, setSplatSort,
+        loadRayScene, loadCornellBox, setRenderMode, setRayTracingSettings,
+        resetAccumulation: () => scene.resetRayAccumulation(),
+        getRenderMode: () => scene.getRenderMode(),
+        getCapabilities: () => ({
+            raster: { available: true },
+            'raytrace-gpu': {
+                available: !!shaderSources.raytraceWgsl && !rayTracingError,
+                reason: rayTracingError?.message || (!shaderSources.raytraceWgsl ? 'GPU ray tracing shader is unavailable.' : undefined),
+            },
+        }),
+        readRayAccumulation: () => scene.readRayAccumulation(),
+        readRayDiagnostics: () => scene.readRayDiagnostics(),
         // Benchmark hook: true end-to-end GPU frame cost, for when fps and
         // timestamp spans can't be trusted (see webgpu-scene.measureFrameCost).
         measureFrameCost: (opts) => scene.measureFrameCost(opts),
         getStats: () => scene.getStats(),
         destroy: () => {
+            if (destroyed) return;
+            destroyed = true;
             if (splatLoader) splatLoader.destroy();
             scene.destroy();
             camera.destroy();
+            rayState = null;
         },
     };
 }
