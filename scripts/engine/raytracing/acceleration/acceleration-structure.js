@@ -70,4 +70,3 @@ export function updateAccelerationStructures(previous, scene, revisions = {}, op
         scene,
     };
 }
-

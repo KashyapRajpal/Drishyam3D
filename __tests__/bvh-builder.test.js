@@ -53,4 +53,3 @@ describe('deterministic median BVH', () => {
     expect(() => buildMedianBvh([record(1, 0), record(1, 2)])).toThrow(/duplicated/);
   });
 });
-

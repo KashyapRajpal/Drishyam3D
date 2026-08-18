@@ -67,4 +67,3 @@ describe('BLAS builder and traversal', () => {
     )).not.toBeNull();
   });
 });
-

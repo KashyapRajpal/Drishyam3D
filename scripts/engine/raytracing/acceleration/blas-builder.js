@@ -52,4 +52,3 @@ export function buildBlas(geometry, geometryIndex, options = {}) {
         diagnostics: built.diagnostics,
     };
 }
-

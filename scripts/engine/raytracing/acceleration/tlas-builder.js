@@ -41,4 +41,3 @@ export function buildTlas(scene, blases, options = {}) {
         diagnostics: built.diagnostics,
     };
 }
-

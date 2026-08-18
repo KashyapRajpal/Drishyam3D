@@ -125,4 +125,3 @@ export function buildMedianBvh(inputRecords, options = {}) {
         diagnostics: { stackCapacity: 64, stackSafe },
     };
 }
-
