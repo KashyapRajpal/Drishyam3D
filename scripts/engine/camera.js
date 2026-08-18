@@ -4,7 +4,7 @@
  * @license MIT
  */
 
-import { createIdentityMatrix, createLookAtMatrix, multiplyMatrices } from './matrix.js';
+import { createIdentityMatrix, createLookAtMatrix } from './matrix.js';
 
 export class Camera {
     constructor(canvas, initialPosition = [0, 0, 5]) {
@@ -23,14 +23,21 @@ export class Camera {
         // World-space eye position, refreshed by updateViewMatrix(). Needed by
         // view-dependent shading (e.g. spherical harmonics) as well as the view matrix.
         this.eye = [...initialPosition];
+        this.destroyed = false;
+        this.boundHandlers = {
+            mousedown: this.onMouseDown.bind(this),
+            mouseup: this.onMouseUp.bind(this),
+            mousemove: this.onMouseMove.bind(this),
+            wheel: this.onWheel.bind(this),
+        };
         this.initEventListeners();
     }
 
     initEventListeners() {
-        this.canvas.addEventListener('mousedown', this.onMouseDown.bind(this));
-        this.canvas.addEventListener('mouseup', this.onMouseUp.bind(this));
-        this.canvas.addEventListener('mousemove', this.onMouseMove.bind(this));
-        this.canvas.addEventListener('wheel', this.onWheel.bind(this));
+        this.canvas.addEventListener('mousedown', this.boundHandlers.mousedown);
+        this.canvas.addEventListener('mouseup', this.boundHandlers.mouseup);
+        this.canvas.addEventListener('mousemove', this.boundHandlers.mousemove);
+        this.canvas.addEventListener('wheel', this.boundHandlers.wheel);
     }
 
     onMouseDown(event) {
@@ -105,5 +112,43 @@ export class Camera {
         this.rotation.y = rotationY;
         this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, zoom));
         this.updateViewMatrix();
+    }
+
+    /** Serializable orbit state used when switching rendering presentations. */
+    getState() {
+        return {
+            target: [...this.target],
+            up: [...this.up],
+            rotationX: this.rotation.x,
+            rotationY: this.rotation.y,
+            zoom: this.zoom,
+            minZoom: this.minZoom,
+            maxZoom: this.maxZoom,
+        };
+    }
+
+    /** Restore a state returned by getState(). */
+    setState(state) {
+        if (!state) return;
+        if (Array.isArray(state.target) && state.target.length === 3) this.target = [...state.target];
+        if (Array.isArray(state.up) && state.up.length === 3) this.up = [...state.up];
+        if (Number.isFinite(state.minZoom)) this.minZoom = state.minZoom;
+        if (Number.isFinite(state.maxZoom)) this.maxZoom = state.maxZoom;
+        this.setPose(
+            Number.isFinite(state.rotationX) ? state.rotationX : this.rotation.x,
+            Number.isFinite(state.rotationY) ? state.rotationY : this.rotation.y,
+            Number.isFinite(state.zoom) ? state.zoom : this.zoom,
+        );
+    }
+
+    /** Remove exactly the listeners registered by this camera. Safe to call twice. */
+    destroy() {
+        if (this.destroyed) return;
+        this.destroyed = true;
+        this.isDragging = false;
+        this.canvas.removeEventListener('mousedown', this.boundHandlers.mousedown);
+        this.canvas.removeEventListener('mouseup', this.boundHandlers.mouseup);
+        this.canvas.removeEventListener('mousemove', this.boundHandlers.mousemove);
+        this.canvas.removeEventListener('wheel', this.boundHandlers.wheel);
     }
 }
