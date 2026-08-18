@@ -1,6 +1,17 @@
 import { Renderer } from './renderer.js';
 import { getMeshPrimitives } from './mesh-renderer.js';
 import { createIdentityMatrix, invertMatrix, multiplyMatrices } from '../matrix.js';
+import { computeSceneBounds } from '../raytracing/core/ray-scene.js';
+import {
+    buildAccelerationStructures,
+    updateAccelerationStructures,
+} from '../raytracing/acceleration/acceleration-structure.js';
+import { packGpuScene, repackGpuTlasAndInstances } from '../raytracing/gpu/gpu-scene-packer.js';
+import {
+    createGpuRaySceneResources,
+    destroyGpuRaySceneResources,
+    uploadGpuRayTlasAndInstances,
+} from '../raytracing/gpu/gpu-ray-helpers.js';
 import {
     createDefaultTexture,
     createSampler,
@@ -10,12 +21,20 @@ import {
     HYBRID_GBUFFER_FORMATS,
     createHybridGBuffer,
     createHybridVisibilityFallback,
+    createHybridVisibilityTarget,
     destroyHybridGBuffer,
+    destroyHybridVisibilityTarget,
 } from '../raytracing/hybrid/gbuffer-layout.js';
 
 export const HYBRID_FRAME_UNIFORM_SIZE = 256;
 export const HYBRID_LIGHT_UNIFORM_SIZE = 64;
+export const HYBRID_SHADOW_UNIFORM_SIZE = 48;
 const HYBRID_MATERIAL_UNIFORM_SIZE = 32;
+const FRAME_FLAG_HAS_TLAS = 1;
+const SHADOW_WORKGROUP_SIZE = 8;
+const SCENE_BUFFER_NAMES = Object.freeze([
+    'vertices', 'triangles', 'bvhNodes', 'bvhLeafReferences', 'instances', 'materials',
+]);
 const LIGHT_TYPE = Object.freeze({ directional: 0, point: 1 });
 const DEFAULT_LIGHT = Object.freeze({
     type: 'directional',
@@ -36,6 +55,20 @@ function validateVector(value, label) {
     }
 }
 
+function matrixKey(matrix) {
+    return Array.from(matrix).join(',');
+}
+
+function createEffectiveScene(scene, userModel) {
+    const instances = scene.instances.map((instance) => {
+        const worldMatrix = multiplyMatrices(userModel, instance.worldMatrix);
+        return { ...instance, worldMatrix, inverseWorldMatrix: invertMatrix(worldMatrix) };
+    });
+    const effective = { ...scene, instances };
+    effective.bounds = computeSceneBounds(effective);
+    return effective;
+}
+
 export class HybridShadowRenderer extends Renderer {
     get kind() { return 'mesh'; }
 
@@ -44,12 +77,16 @@ export class HybridShadowRenderer extends Renderer {
         this.layouts = null;
         this.gbufferPipeline = null;
         this.compositePipeline = null;
+        this.shadowPipeline = null;
         this.gbuffer = null;
+        this.visibilityTarget = null;
         this.visibilityFallback = null;
         this.defaultTexture = null;
         this.sampler = null;
         this.lightBuffer = null;
+        this.shadowUniformBuffer = null;
         this.compositeBindGroup = null;
+        this.shadowAttachmentBindGroup = null;
         this.drawableStates = new WeakMap();
         this.liveStates = new Set();
         this.light = { ...DEFAULT_LIGHT, direction: [...DEFAULT_LIGHT.direction], color: [...DEFAULT_LIGHT.color] };
@@ -87,17 +124,44 @@ export class HybridShadowRenderer extends Renderer {
                 { binding: 4, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform', minBindingSize: HYBRID_LIGHT_UNIFORM_SIZE } },
             ],
         });
+        const shadowScene = this.device.createBindGroupLayout({
+            label: 'Hybrid shadow scene layout',
+            entries: [
+                { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform', minBindingSize: HYBRID_SHADOW_UNIFORM_SIZE } },
+                ...SCENE_BUFFER_NAMES.map((_name, index) => ({
+                    binding: index + 1,
+                    visibility: GPUShaderStage.COMPUTE,
+                    buffer: { type: 'read-only-storage' },
+                })),
+            ],
+        });
+        const shadowAttachments = this.device.createBindGroupLayout({
+            label: 'Hybrid shadow attachment layout',
+            entries: [
+                { binding: 0, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float' } },
+                { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float' } },
+                {
+                    binding: 2,
+                    visibility: GPUShaderStage.COMPUTE,
+                    storageTexture: { access: 'write-only', format: HYBRID_GBUFFER_FORMATS.visibility },
+                },
+            ],
+        });
         this.layouts = {
             frame,
             material,
             composite,
+            shadowScene,
+            shadowAttachments,
             gbufferPipeline: this.device.createPipelineLayout({ bindGroupLayouts: [frame, material] }),
             compositePipeline: this.device.createPipelineLayout({ bindGroupLayouts: [composite] }),
+            shadowPipeline: this.device.createPipelineLayout({ bindGroupLayouts: [shadowScene, shadowAttachments] }),
         };
         this.sampler = createSampler(this.device);
         this.defaultTexture = createDefaultTexture(this.device);
         this.visibilityFallback = createHybridVisibilityFallback(this.device);
         this.lightBuffer = createUniformBuffer(this.device, HYBRID_LIGHT_UNIFORM_SIZE);
+        this.shadowUniformBuffer = createUniformBuffer(this.device, HYBRID_SHADOW_UNIFORM_SIZE);
         this.initialized = true;
     }
 
@@ -144,6 +208,22 @@ export class HybridShadowRenderer extends Renderer {
         this.compositeBindGroup = null;
     }
 
+    setShadowShader(shadowSource) {
+        if (!shadowSource) throw new Error('Hybrid shadow compute WGSL is required.');
+        if (!this.initialized) this.init();
+        const module = this.device.createShaderModule({ label: 'Hybrid any-hit shadow shader', code: shadowSource });
+        this.shadowPipeline = this.device.createComputePipeline({
+            label: 'Hybrid any-hit shadow pipeline',
+            layout: this.layouts.shadowPipeline,
+            compute: { module, entryPoint: 'cs_shadow' },
+        });
+        this.compositeBindGroup = null;
+        this.shadowAttachmentBindGroup = null;
+        for (const state of this.liveStates) {
+            this._destroyShadowState(state);
+        }
+    }
+
     setLight(partial = {}) {
         const next = { ...this.light, ...partial };
         if (!(next.type in LIGHT_TYPE)) throw new Error('Hybrid light type must be directional or point.');
@@ -163,11 +243,102 @@ export class HybridShadowRenderer extends Renderer {
     _destroyState(state) {
         if (!state || state.destroyed) return;
         state.destroyed = true;
+        this._destroyShadowState(state);
         for (const primitive of state.primitives) {
             destroy(primitive.frameBuffer);
             destroy(primitive.materialBuffer);
         }
         this.liveStates.delete(state);
+    }
+
+    _destroyShadowState(state) {
+        if (!state?.shadow) return;
+        destroyGpuRaySceneResources(state.shadow.sceneResources);
+        state.shadow = null;
+    }
+
+    _createShadowSceneBindGroup(sceneResources) {
+        return this.device.createBindGroup({
+            label: 'Hybrid shadow scene bind group',
+            layout: this.layouts.shadowScene,
+            entries: [
+                { binding: 0, resource: { buffer: this.shadowUniformBuffer } },
+                ...SCENE_BUFFER_NAMES.map((name, index) => ({
+                    binding: index + 1,
+                    resource: { buffer: sceneResources.buffers[name] },
+                })),
+            ],
+        });
+    }
+
+    _createFullShadowState(baseScene, userModel, revisions) {
+        const effectiveScene = createEffectiveScene(baseScene, userModel);
+        const acceleration = buildAccelerationStructures(effectiveScene, { revisions });
+        const packedScene = packGpuScene(effectiveScene, acceleration);
+        const sceneResources = createGpuRaySceneResources(this.device, packedScene);
+        return {
+            baseScene,
+            effectiveScene,
+            acceleration,
+            packedScene,
+            sceneResources,
+            sceneBindGroup: this._createShadowSceneBindGroup(sceneResources),
+            modelKey: matrixKey(userModel),
+            geometryRevision: revisions.geometryRevision,
+            sourceInstanceRevision: revisions.instanceRevision,
+            dynamicInstanceRevision: revisions.instanceRevision,
+        };
+    }
+
+    _ensureShadowScene(state, drawable, userModel) {
+        if (!this.shadowPipeline) return null;
+        const baseScene = drawable.rayTracing?.preparedRayScene;
+        if (!baseScene) throw new Error('Hybrid shadows require a prepared RayScene sidecar.');
+        const revisions = {
+            geometryRevision: drawable.rayTracing.geometryRevision ?? 0,
+            instanceRevision: drawable.rayTracing.instanceRevision ?? 0,
+        };
+        const nextModelKey = matrixKey(userModel);
+        const needsFullRebuild = !state.shadow
+            || state.shadow.baseScene !== baseScene
+            || state.shadow.geometryRevision !== revisions.geometryRevision;
+        if (needsFullRebuild) {
+            this._destroyShadowState(state);
+            state.shadow = this._createFullShadowState(baseScene, userModel, revisions);
+            return state.shadow;
+        }
+        const transformChanged = state.shadow.modelKey !== nextModelKey
+            || state.shadow.sourceInstanceRevision !== revisions.instanceRevision;
+        if (!transformChanged) return state.shadow;
+
+        const effectiveScene = createEffectiveScene(baseScene, userModel);
+        const dynamicInstanceRevision = state.shadow.dynamicInstanceRevision + 1;
+        const acceleration = updateAccelerationStructures(
+            state.shadow.acceleration,
+            effectiveScene,
+            { geometryRevision: revisions.geometryRevision, instanceRevision: dynamicInstanceRevision },
+        );
+        try {
+            const ranges = repackGpuTlasAndInstances(state.shadow.packedScene, effectiveScene, acceleration);
+            uploadGpuRayTlasAndInstances(
+                this.device,
+                state.shadow.sceneResources,
+                state.shadow.packedScene,
+                ranges,
+            );
+            Object.assign(state.shadow, {
+                effectiveScene,
+                acceleration,
+                modelKey: nextModelKey,
+                sourceInstanceRevision: revisions.instanceRevision,
+                dynamicInstanceRevision,
+            });
+        } catch (error) {
+            if (!/requires stable instance, node, and leaf counts/.test(error.message)) throw error;
+            this._destroyShadowState(state);
+            state.shadow = this._createFullShadowState(baseScene, userModel, revisions);
+        }
+        return state.shadow;
     }
 
     prepare(drawable) {
@@ -176,7 +347,7 @@ export class HybridShadowRenderer extends Renderer {
         if (!this.initialized) this.init();
         const meshPrimitives = getMeshPrimitives(drawable);
         const current = this.drawableStates.get(drawable);
-        if (!current || current.meshPrimitives.length !== meshPrimitives.length
+        if (!current || current.destroyed || current.meshPrimitives.length !== meshPrimitives.length
             || !current.meshPrimitives.every((primitive, index) => primitive === meshPrimitives[index])) {
             this._destroyState(current);
             const state = {
@@ -213,12 +384,25 @@ export class HybridShadowRenderer extends Renderer {
     }
 
     _ensureGBuffer(width, height) {
-        if (this.gbuffer?.width === width && this.gbuffer?.height === height) return;
+        const visibilityReady = !this.shadowPipeline
+            || (this.visibilityTarget?.width === width && this.visibilityTarget?.height === height);
+        if (this.gbuffer?.width === width && this.gbuffer?.height === height && visibilityReady) return;
         const next = createHybridGBuffer(this.device, width, height);
+        let nextVisibility = null;
+        try {
+            if (this.shadowPipeline) nextVisibility = createHybridVisibilityTarget(this.device, width, height);
+        } catch (error) {
+            destroyHybridGBuffer(next);
+            throw error;
+        }
         const previous = this.gbuffer;
+        const previousVisibility = this.visibilityTarget;
         this.gbuffer = next;
+        this.visibilityTarget = nextVisibility;
         this.compositeBindGroup = null;
+        this.shadowAttachmentBindGroup = null;
         destroyHybridGBuffer(previous);
+        destroyHybridVisibilityTarget(previousVisibility);
     }
 
     _ensureCompositeBindGroup() {
@@ -229,8 +413,21 @@ export class HybridShadowRenderer extends Renderer {
                 { binding: 0, resource: this.gbuffer.worldPosition.view },
                 { binding: 1, resource: this.gbuffer.albedo.view },
                 { binding: 2, resource: this.gbuffer.normal.view },
-                { binding: 3, resource: this.visibilityFallback.createView() },
+                { binding: 3, resource: this.visibilityTarget?.view || this.visibilityFallback.createView() },
                 { binding: 4, resource: { buffer: this.lightBuffer } },
+            ],
+        });
+    }
+
+    _ensureShadowAttachmentBindGroup() {
+        if (this.shadowAttachmentBindGroup || !this.visibilityTarget) return;
+        this.shadowAttachmentBindGroup = this.device.createBindGroup({
+            label: 'Hybrid shadow attachment bind group',
+            layout: this.layouts.shadowAttachments,
+            entries: [
+                { binding: 0, resource: this.gbuffer.worldPosition.view },
+                { binding: 1, resource: this.gbuffer.normal.view },
+                { binding: 2, resource: this.visibilityTarget.view },
             ],
         });
     }
@@ -262,13 +459,31 @@ export class HybridShadowRenderer extends Renderer {
         this.device.queue.writeBuffer(this.lightBuffer, 0, data);
     }
 
+    _uploadShadowUniforms(shadowState, width, height) {
+        const buffer = new ArrayBuffer(HYBRID_SHADOW_UNIFORM_SIZE);
+        const floats = new Float32Array(buffer);
+        const integers = new Uint32Array(buffer);
+        floats.set(this.light.type === 'point' ? this.light.position : this.light.direction, 0);
+        floats[3] = LIGHT_TYPE[this.light.type];
+        const sceneRadius = shadowState.effectiveScene.bounds?.radius || 0;
+        floats[4] = 1e-4 * Math.max(1, sceneRadius);
+        floats[5] = Math.max(1, sceneRadius * 4); // Twice the scene diagonal.
+        integers[8] = width;
+        integers[9] = height;
+        integers[10] = shadowState.packedScene.metadata.tlasNodeCount > 0 ? FRAME_FLAG_HAS_TLAS : 0;
+        this.device.queue.writeBuffer(this.shadowUniformBuffer, 0, buffer);
+    }
+
     record(frame, drawable) {
         if (this.destroyed || !this.gbufferPipeline || !this.compositePipeline || !drawable) return;
         this.prepare(drawable);
         const state = this.drawableStates.get(drawable);
         if (!state?.meshPrimitives.length || frame.width < 1 || frame.height < 1) return;
+        const userModel = frame.sceneState.modelViewMatrix || createIdentityMatrix();
+        const shadowState = this._ensureShadowScene(state, drawable, userModel);
         this._ensureGBuffer(frame.width, frame.height);
         this._ensureCompositeBindGroup();
+        this._ensureShadowAttachmentBindGroup();
         state.meshPrimitives.forEach((primitive, index) => this._uploadPrimitive(frame, primitive, state.primitives[index]));
         this._uploadLight();
 
@@ -299,6 +514,22 @@ export class HybridShadowRenderer extends Renderer {
         });
         gbufferPass.end();
 
+        if (shadowState && this.visibilityTarget) {
+            this._uploadShadowUniforms(shadowState, frame.width, frame.height);
+            const shadowPass = frame.encoder.beginComputePass({
+                label: 'Hybrid any-hit shadow pass',
+                timestampWrites: frame.gpuTimer?.span('shadow'),
+            });
+            shadowPass.setPipeline(this.shadowPipeline);
+            shadowPass.setBindGroup(0, shadowState.sceneBindGroup);
+            shadowPass.setBindGroup(1, this.shadowAttachmentBindGroup);
+            shadowPass.dispatchWorkgroups(
+                Math.ceil(frame.width / SHADOW_WORKGROUP_SIZE),
+                Math.ceil(frame.height / SHADOW_WORKGROUP_SIZE),
+            );
+            shadowPass.end();
+        }
+
         const compositePass = frame.encoder.beginRenderPass({
             label: 'Hybrid composite pass',
             timestampWrites: frame.gpuTimer?.span('composite'),
@@ -316,6 +547,7 @@ export class HybridShadowRenderer extends Renderer {
     }
 
     getStats() {
+        const shadow = this.drawable ? this.drawableStates.get(this.drawable)?.shadow : null;
         return {
             backend: 'webgpu',
             renderMode: 'hybrid-shadows',
@@ -323,6 +555,8 @@ export class HybridShadowRenderer extends Renderer {
             triangleCount: this.drawable?.vertexCount ? this.drawable.vertexCount / 3 : 0,
             instanceCount: getMeshPrimitives(this.drawable).length,
             spp: 0,
+            blasBuildMs: shadow?.acceleration?.blasBuildMs || 0,
+            tlasBuildMs: shadow?.acceleration?.tlasBuildMs || 0,
         };
     }
 
@@ -336,14 +570,20 @@ export class HybridShadowRenderer extends Renderer {
         if (this.destroyed) return;
         for (const state of [...this.liveStates]) this._destroyState(state);
         destroyHybridGBuffer(this.gbuffer);
+        destroyHybridVisibilityTarget(this.visibilityTarget);
         destroy(this.visibilityFallback);
         destroy(this.defaultTexture);
         destroy(this.lightBuffer);
+        destroy(this.shadowUniformBuffer);
         this.gbuffer = null;
+        this.visibilityTarget = null;
         this.visibilityFallback = null;
         this.defaultTexture = null;
         this.lightBuffer = null;
+        this.shadowUniformBuffer = null;
         this.compositeBindGroup = null;
+        this.shadowAttachmentBindGroup = null;
+        this.shadowPipeline = null;
         this.destroyed = true;
     }
 }

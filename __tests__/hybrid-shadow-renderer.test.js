@@ -2,10 +2,13 @@ import {
   HYBRID_GBUFFER_FORMATS,
   createHybridGBuffer,
   createHybridVisibilityFallback,
+  createHybridVisibilityTarget,
   destroyHybridGBuffer,
+  destroyHybridVisibilityTarget,
 } from '../scripts/engine/raytracing/hybrid/gbuffer-layout.js';
 import { HybridShadowRenderer } from '../scripts/engine/renderers/hybrid-shadow-renderer.js';
 import { createIdentityMatrix } from '../scripts/engine/matrix.js';
+import { prepareRayScene } from '../scripts/engine/raytracing/core/ray-scene.js';
 
 function trackedResource(desc = {}) {
   const resource = {
@@ -20,6 +23,11 @@ function deviceHarness() {
   const textures = [];
   const buffers = [];
   const device = {
+    limits: {
+      maxStorageBuffersPerShaderStage: 8,
+      maxStorageBufferBindingSize: 1 << 24,
+      maxBufferSize: 1 << 24,
+    },
     queue: { writeTexture: jest.fn(), writeBuffer: jest.fn() },
     createTexture: jest.fn((desc) => {
       const texture = trackedResource(desc);
@@ -37,6 +45,7 @@ function deviceHarness() {
     createBindGroup: jest.fn((desc) => ({ desc })),
     createShaderModule: jest.fn((desc) => ({ desc })),
     createRenderPipeline: jest.fn((desc) => ({ desc })),
+    createComputePipeline: jest.fn((desc) => ({ desc })),
   };
   return { device, textures, buffers };
 }
@@ -64,7 +73,7 @@ function meshBuffers(name) {
 
 describe('hybrid G-buffer resources', () => {
   beforeEach(() => {
-    global.GPUTextureUsage = { RENDER_ATTACHMENT: 1, TEXTURE_BINDING: 2, COPY_DST: 4 };
+    global.GPUTextureUsage = { RENDER_ATTACHMENT: 1, TEXTURE_BINDING: 2, COPY_DST: 4, STORAGE_BINDING: 8 };
   });
 
   test('uses the specified formats and destroys a complete attachment set once', () => {
@@ -87,12 +96,21 @@ describe('hybrid G-buffer resources', () => {
     expect(fallback.desc).toMatchObject({ size: [1, 1, 1], format: 'rgba8unorm' });
     expect(device.queue.writeTexture.mock.calls[0][1]).toEqual(new Uint8Array([255, 0, 0, 255]));
   });
+
+  test('creates and idempotently destroys a screen-sized storage visibility target', () => {
+    const { device } = deviceHarness();
+    const target = createHybridVisibilityTarget(device, 24, 12);
+    expect(target.texture.desc).toMatchObject({ size: [24, 12, 1], format: 'rgba8unorm' });
+    destroyHybridVisibilityTarget(target);
+    destroyHybridVisibilityTarget(target);
+    expect(target.texture.destroy).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('HybridShadowRenderer G-buffer foundation', () => {
   beforeEach(() => {
-    global.GPUTextureUsage = { RENDER_ATTACHMENT: 1, TEXTURE_BINDING: 2, COPY_DST: 4 };
-    global.GPUBufferUsage = { UNIFORM: 1, COPY_DST: 2 };
+    global.GPUTextureUsage = { RENDER_ATTACHMENT: 1, TEXTURE_BINDING: 2, COPY_DST: 4, STORAGE_BINDING: 8 };
+    global.GPUBufferUsage = { UNIFORM: 1, COPY_DST: 2, STORAGE: 4 };
     global.GPUShaderStage = { VERTEX: 1, FRAGMENT: 2, COMPUTE: 4 };
   });
 
@@ -188,5 +206,83 @@ describe('HybridShadowRenderer G-buffer foundation', () => {
     expect(() => renderer.setLight({ type: 'spot' })).toThrow(/directional or point/);
     expect(() => renderer.setLight({ type: 'point' })).toThrow(/point light vector/);
     expect(() => renderer.setLight({ intensity: -1 })).toThrow(/intensity/);
+  });
+
+  test('records G-buffer, any-hit shadow, and composite passes while retaining BLASes across transforms', () => {
+    const { device } = deviceHarness();
+    const orderedPasses = [];
+    const renderPasses = [];
+    const computePass = {
+      setPipeline: jest.fn(), setBindGroup: jest.fn(), dispatchWorkgroups: jest.fn(), end: jest.fn(),
+    };
+    const encoder = {
+      beginRenderPass: jest.fn((desc) => {
+        const pass = passHarness();
+        orderedPasses.push(desc.label);
+        renderPasses.push(pass);
+        return pass;
+      }),
+      beginComputePass: jest.fn((desc) => {
+        orderedPasses.push(desc.label);
+        return computePass;
+      }),
+    };
+    const scene = prepareRayScene({
+      geometries: [{
+        id: 0,
+        revision: 0,
+        positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+        normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+        indices: new Uint16Array([0, 1, 2]),
+      }],
+      instances: [{ id: 0, geometryIndex: 0, materialIndex: 0, worldMatrix: createIdentityMatrix() }],
+      materials: [{ baseColor: [1, 1, 1, 1] }],
+      lights: [],
+      environment: { color: [0, 0, 0] },
+    });
+    const drawable = {
+      kind: 'mesh',
+      vertexCount: 3,
+      primitives: [{
+        buffers: meshBuffers('triangle'), texture: null, indexCount: 3, indexFormat: 'uint16',
+        material: { baseColor: [1, 1, 1, 1] }, worldMatrix: createIdentityMatrix(),
+      }],
+      rayTracing: { preparedRayScene: scene, geometryRevision: 0, instanceRevision: 0 },
+    };
+    const renderer = new HybridShadowRenderer(device, 'bgra8unorm');
+    renderer.setShaders('gbuffer shader', 'composite shader');
+    renderer.setShadowShader('shadow shader');
+    const frame = {
+      device,
+      encoder,
+      targetView: 'target',
+      viewMatrix: createIdentityMatrix(),
+      projectionMatrix: createIdentityMatrix(),
+      width: 65,
+      height: 33,
+      sceneState: { modelViewMatrix: createIdentityMatrix() },
+      gpuTimer: { span: jest.fn((name) => ({ name })) },
+    };
+    renderer.record(frame, drawable);
+    expect(orderedPasses).toEqual([
+      'Hybrid G-buffer pass', 'Hybrid any-hit shadow pass', 'Hybrid composite pass',
+    ]);
+    expect(computePass.dispatchWorkgroups).toHaveBeenCalledWith(9, 5);
+    const firstShadow = renderer.drawableStates.get(drawable).shadow;
+    const firstBlas = firstShadow.acceleration.blases[0];
+    const firstResources = firstShadow.sceneResources;
+
+    frame.sceneState.modelViewMatrix = createIdentityMatrix();
+    frame.sceneState.modelViewMatrix[12] = 2;
+    orderedPasses.length = 0;
+    renderer.record(frame, drawable);
+    const updatedShadow = renderer.drawableStates.get(drawable).shadow;
+    expect(updatedShadow.acceleration.blases[0]).toBe(firstBlas);
+    expect(updatedShadow.sceneResources).toBe(firstResources);
+    expect(updatedShadow.effectiveScene.instances[0].worldMatrix[12]).toBeCloseTo(2);
+    expect(device.queue.writeBuffer.mock.calls.some((call) => call[0].desc?.label === 'Ray tracing instances')).toBe(true);
+    expect(orderedPasses).toEqual([
+      'Hybrid G-buffer pass', 'Hybrid any-hit shadow pass', 'Hybrid composite pass',
+    ]);
   });
 });

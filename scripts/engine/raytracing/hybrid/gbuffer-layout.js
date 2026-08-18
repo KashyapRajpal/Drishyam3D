@@ -68,3 +68,22 @@ export function createHybridVisibilityFallback(device) {
     );
     return texture;
 }
+
+export function createHybridVisibilityTarget(device, width, height) {
+    if (!Number.isInteger(width) || width < 1 || !Number.isInteger(height) || height < 1) {
+        throw new Error('Hybrid visibility dimensions must be positive integers.');
+    }
+    const texture = device.createTexture({
+        label: 'Hybrid ray-traced visibility',
+        size: [width, height, 1],
+        format: HYBRID_GBUFFER_FORMATS.visibility,
+        usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
+    });
+    return { width, height, texture, view: texture.createView(), destroyed: false };
+}
+
+export function destroyHybridVisibilityTarget(target) {
+    if (!target || target.destroyed) return;
+    target.destroyed = true;
+    target.texture?.destroy?.();
+}
