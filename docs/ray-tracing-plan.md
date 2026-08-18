@@ -1414,6 +1414,20 @@ Phase review:
 5. Check mode/asset replacement and double-destroy with validation enabled.
 6. Update packet status below only after evidence exists.
 
+PR visual evidence for every user-visible rendering change:
+
+1. Attach at least one deterministic screenshot to the PR body using a named scene, camera
+   pose, resolution, render mode, backend, and SPP/debug settings.
+2. Attach a short compressed GIF when the change is progressive or interactive—for
+   example accumulation convergence, camera-reset behavior, mode switching, or animated
+   shadows. A still image is sufficient for a genuinely static visual change.
+3. Include a concise caption stating what reviewers should inspect and record the browser,
+   GPU/CPU, and operating system used for the capture.
+4. Prefer GitHub-uploaded PR attachments so review media does not enlarge repository
+   history. Commit images only when they are intentional visual-regression fixtures.
+5. Keep captures tightly cropped and small enough to load quickly in the PR conversation;
+   link a longer video separately only when a short GIF cannot demonstrate the behavior.
+
 Implementation status:
 
 | Packet | Status | Evidence |
