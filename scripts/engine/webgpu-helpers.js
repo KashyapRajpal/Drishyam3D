@@ -29,7 +29,20 @@ export async function initWebGPU(canvas) {
     // Opt into timestamp queries for per-pass GPU timing when the adapter supports it.
     const requiredFeatures = [];
     if (adapter.features.has('timestamp-query')) requiredFeatures.push('timestamp-query');
-    const device = await adapter.requestDevice({ requiredFeatures });
+
+    // A device gets the *spec defaults* (128 MiB storage binding, 256 MiB buffer)
+    // unless limits are requested, no matter what the hardware can do — an Intel
+    // gen-9 adapter reports 2 GiB for both. Those defaults, not the GPU, are what
+    // stops a 3.5M-splat capture (214 MiB of packed splats) from loading. Ask for
+    // what the adapter actually reports; requesting exactly its own values is
+    // always valid, so this cannot fail where the default would have succeeded.
+    const requiredLimits = {};
+    for (const key of ['maxStorageBufferBindingSize', 'maxBufferSize']) {
+        const value = adapter.limits?.[key];
+        if (typeof value === 'number' && Number.isFinite(value)) requiredLimits[key] = value;
+    }
+
+    const device = await adapter.requestDevice({ requiredFeatures, requiredLimits });
     const context = canvas.getContext('webgpu');
     const format = navigator.gpu.getPreferredCanvasFormat();
 

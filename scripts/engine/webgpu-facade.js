@@ -149,6 +149,18 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
     // creation must stay on the main thread (no device inside the worker), and
     // the SH degree can only be fitted here since it depends on device limits.
     function buildSplatDrawable(payload) {
+        // Checked before allocating: unlike the SH buffer (which fitShDegree
+        // degrades), an oversized splat buffer used to reach createBuffer and fail
+        // as a bare WebGPU validation error with nothing actionable in it.
+        const maxBinding = device.limits.maxStorageBufferBindingSize;
+        if (payload.packed.byteLength > maxBinding) {
+            const mib = (bytes) => Math.round(bytes / 1048576);
+            throw new Error(
+                `Splat cloud too large for this device: ${payload.count.toLocaleString()} splats ` +
+                `need ${mib(payload.packed.byteLength)} MiB of storage buffer, but the limit is ` +
+                `${mib(maxBinding)} MiB. Load a smaller capture.`,
+            );
+        }
         const storageBuffer = createSplatStorageBuffer(device, payload.packed);
 
         const shDegree = fitShDegree(
