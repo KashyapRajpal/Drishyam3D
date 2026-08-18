@@ -292,6 +292,7 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
         destroy: () => {
             if (splatLoader) splatLoader.destroy();
             scene.destroy();
+            camera.destroy();
         },
     };
 }

@@ -57,7 +57,6 @@ export function createScene(gl, canvas, camera) {
         console.log(`${logSource}: previous drawable was`, getDrawableName(_drawable));
         _drawable = nextDrawable;
         console.log(`${logSource}: drawable set to`, getDrawableName(_drawable));
-        requestAnimationFrame(render);
         forceUpdate({ reinitScript: true });
         return true;
     }
@@ -188,11 +187,13 @@ export function createScene(gl, canvas, camera) {
     };
 
     let then = 0;
-    let active = true; // Set to false by destroy() to stop this scene's render loop
+    let active = true; // Set to false permanently by destroy().
+    let paused = false;
+    let rafPending = false;
     let fpsAccum = 0, fpsCount = 0, displayFps = 0, displayMs = 0;
 
     function forceUpdate({ reinitScript = false } = {}) {
-        if (!active) return;
+        if (!active || paused) return;
         if (reinitScript) {
             try {
                 userScript.init(sceneState);
@@ -200,11 +201,15 @@ export function createScene(gl, canvas, camera) {
                 // ignore init errors
             }
         }
-        requestAnimationFrame(render);
+        if (!rafPending) {
+            rafPending = true;
+            requestAnimationFrame(render);
+        }
     }
 
     function render(now) {
-        if (!active) return;
+        rafPending = false;
+        if (!active || paused) return;
         now *= 0.001; // Convert to seconds
         const deltaTime = now - then;
         then = now;
@@ -225,7 +230,7 @@ export function createScene(gl, canvas, camera) {
 
         // Exit if we don't have a drawable object or a shader program
         if (!programInfo || !drawable) {
-            requestAnimationFrame(render);
+            forceUpdate();
             return;
         }
 
@@ -335,7 +340,7 @@ export function createScene(gl, canvas, camera) {
             if (errAfter !== gl.NO_ERROR) console.warn('GL error after drawElements:', errAfter);
         }
 
-        requestAnimationFrame(render);
+        forceUpdate();
     }
 
     return {
@@ -346,6 +351,15 @@ export function createScene(gl, canvas, camera) {
 
             console.log('start() completed. Current drawable name:', getDrawableName(getDrawable()));
             
+        },
+        pause: () => {
+            paused = true;
+        },
+        resume: () => {
+            if (!active || !paused) return;
+            paused = false;
+            then = 0;
+            forceUpdate();
         },
         updateProgramInfo: (newProgramInfo) => {
             console.log('updateProgramInfo called. Current drawable name:', getDrawableName(getDrawable()));
@@ -378,6 +392,7 @@ export function createScene(gl, canvas, camera) {
         }),
         destroy: () => {
             active = false;
+            paused = true;
             _drawable = null;
         },
     };

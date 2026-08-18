@@ -24,6 +24,7 @@ export class Camera {
         // view-dependent shading (e.g. spherical harmonics) as well as the view matrix.
         this.eye = [...initialPosition];
         this.destroyed = false;
+        this.changeHandler = null;
         this.boundHandlers = {
             mousedown: this.onMouseDown.bind(this),
             mouseup: this.onMouseUp.bind(this),
@@ -63,6 +64,7 @@ export class Camera {
 
         this.lastMousePosition = { x: event.clientX, y: event.clientY };
         this.updateViewMatrix();
+        this.changeHandler?.(this.getState());
     }
 
     onWheel(event) {
@@ -74,6 +76,7 @@ export class Camera {
         this.zoom *= Math.exp(event.deltaY * 0.001);
         this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.zoom));
         this.updateViewMatrix();
+        this.changeHandler?.(this.getState());
     }
 
 
@@ -112,6 +115,11 @@ export class Camera {
         this.rotation.y = rotationY;
         this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, zoom));
         this.updateViewMatrix();
+        this.changeHandler?.(this.getState());
+    }
+
+    setChangeHandler(handler) {
+        this.changeHandler = typeof handler === 'function' ? handler : null;
     }
 
     /** Serializable orbit state used when switching rendering presentations. */
@@ -145,6 +153,7 @@ export class Camera {
     destroy() {
         if (this.destroyed) return;
         this.destroyed = true;
+        this.changeHandler = null;
         this.isDragging = false;
         this.canvas.removeEventListener('mousedown', this.boundHandlers.mousedown);
         this.canvas.removeEventListener('mouseup', this.boundHandlers.mouseup);

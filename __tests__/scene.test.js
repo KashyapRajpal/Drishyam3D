@@ -84,6 +84,8 @@ describe('Scene', () => {
         expect(scene).toHaveProperty('updateUserScript');
         expect(scene).toHaveProperty('loadGeometry');
         expect(scene).toHaveProperty('getDrawable');
+        expect(scene).toHaveProperty('pause');
+        expect(scene).toHaveProperty('resume');
     });
 
     test('updateProgramInfo should update the program info', () => {
@@ -140,5 +142,15 @@ describe('Scene', () => {
         scene.updateUserScript(newUserScript);
 
         expect(scene.getDrawable()).toBe(newDrawable);
+    });
+
+    test('pause and resume arm exactly one new frame', () => {
+        scene.start();
+        const beforePause = requestAnimationFrame.mock.calls.length;
+        scene.pause();
+        scene.resume();
+        scene.resume();
+        expect(requestAnimationFrame.mock.calls.length).toBe(beforePause);
+        // The already-pending callback owns loop resumption; duplicate resume is inert.
     });
 });

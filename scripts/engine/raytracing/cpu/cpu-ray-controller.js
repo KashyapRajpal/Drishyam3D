@@ -79,9 +79,10 @@ export function createCpuRayController({ workerFactory, presentTile, onStats, on
             running = true;
             requestPass();
         },
-        reset() {
+        reset(nextRenderRequest) {
             if (!retained) return;
             const wasRunning = running;
+            if (nextRenderRequest) renderRequest = { tileSize: 32, ...nextRenderRequest };
             initialize(retained.preparedScene, retained.acceleration, retained.settings);
             running = wasRunning;
         },

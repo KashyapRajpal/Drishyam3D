@@ -18,7 +18,8 @@ import { GpuTimer } from './gpu-timer.js';
 
 export function createWebGPUScene(device, context, format, canvas, camera) {
     let drawable = null;
-    let active = true; // Set to false by destroy() to stop this scene's render loop
+    let active = true; // Set to false permanently by destroy().
+    let paused = false;
     let then = 0;
     let fpsAccum = 0, fpsCount = 0, displayFps = 0, displayMs = 0;
     let rafPending = false; // Guard against rAF loop accumulation
@@ -55,7 +56,6 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
         drawable = next;
         if (previous) rendererFor(previous)?.releaseDrawable(previous);
         rendererFor(drawable)?.prepare(drawable);
-        requestAnimationFrame(render);
         forceUpdate({ reinitScript: true });
     }
 
@@ -74,7 +74,7 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
     }
 
     function forceUpdate({ reinitScript = false } = {}) {
-        if (!active) return;
+        if (!active || paused) return;
         if (reinitScript) {
             try { userScript.init(sceneState); } catch (e) { /* ignore */ }
         }
@@ -90,13 +90,13 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
         // flag would strand it true, and a suspended loop (measureFrameCost) would
         // then never re-arm — rendering stops permanently after a benchmark.
         rafPending = false;
-        if (!active) return;
+        if (!active || paused) return;
         try {
             _renderFrame(now);
         } catch (e) {
             console.error('WebGPU render error:', e);
         }
-        if (active) {
+        if (active && !paused) {
             rafPending = true;
             requestAnimationFrame(render);
         }
@@ -185,6 +185,17 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
             splatRenderer.init();
             splatTileRenderer.init();
             forceUpdate({ reinitScript: true });
+        },
+
+        pause() {
+            paused = true;
+        },
+
+        resume() {
+            if (!active || !paused) return;
+            paused = false;
+            then = 0;
+            forceUpdate();
         },
 
         setSplatRenderMode(mode) {
@@ -291,7 +302,7 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
                 };
             } finally {
                 active = wasActive;
-                if (active && !rafPending) {
+                if (active && !paused && !rafPending) {
                     rafPending = true;
                     requestAnimationFrame(render);
                 }
@@ -325,6 +336,7 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
 
         destroy() {
             active = false;
+            paused = true;
             if (drawable) rendererFor(drawable)?.releaseDrawable(drawable);
             meshRenderer.destroy();
             splatRenderer.destroy();
