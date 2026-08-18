@@ -144,6 +144,22 @@ body,html,#root{height:100%;margin:0}
 	background-color: rgba(255, 255, 255, 0.03);
 }
 
+.dropdown-content a.disabled {
+	opacity: 0.38;
+	cursor: not-allowed;
+}
+
+.dropdown-content a.disabled:hover {
+	background-color: transparent;
+}
+
+.ray-menu-label {
+	padding: 4px 12px;
+	opacity: 0.6;
+	font-size: 0.8em;
+	user-select: none;
+}
+
 .menu-container:hover > .dropdown-content {
 	display: block;
 }

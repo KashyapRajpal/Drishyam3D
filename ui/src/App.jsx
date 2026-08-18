@@ -34,6 +34,7 @@ import {
   loadAssetFromDirectory,
 } from '@engine/scene-ops.js'
 import { ViewportCanvases } from './components/ViewportCanvases.jsx'
+import { RayTracingControls } from './components/RayTracingControls.jsx'
 
 const shaderFiles = import.meta.glob('../../assets/shaders/**/*.{vert,frag,glsl,wgsl}', { query: '?raw', import: 'default' })
 const engineFiles = import.meta.glob('../../scripts/engine/**/*.js', { query: '?raw', import: 'default' })
@@ -86,6 +87,7 @@ function StatsOverlay({ stats }) {
   if (!stats) return null
   const isCpuRayTracing = stats.renderMode === 'raytrace-cpu'
   const isGpuRayTracing = stats.renderMode === 'raytrace-gpu'
+  const isHybridRayTracing = stats.renderMode === 'hybrid-shadows'
   return (
     <div style={{
       position: 'absolute',
@@ -111,9 +113,19 @@ function StatsOverlay({ stats }) {
           <div>GPU path tracing · {stats.spp || 0} spp</div>
           <div>{stats.fps} fps ({stats.frameMs}ms)</div>
         </>
+      ) : isHybridRayTracing ? (
+        <>
+          <div>Hybrid ray-traced shadows</div>
+          <div>{stats.fps} fps ({stats.frameMs}ms)</div>
+        </>
       ) : <div>{stats.fps} fps ({stats.frameMs}ms)</div>}
       <div>{stats.drawableKind}</div>
       {stats.triangleCount > 0 && <div>{formatCount(stats.triangleCount)} tris</div>}
+      {stats.blasBuildMs > 0 && <div style={{ color: '#9cf' }}>BLAS {stats.blasBuildMs.toFixed(2)}ms</div>}
+      {stats.tlasBuildMs > 0 && <div style={{ color: '#9cf' }}>TLAS {stats.tlasBuildMs.toFixed(2)}ms</div>}
+      {isHybridRayTracing && stats.passMs?.gbuffer != null && <div style={{ color: '#fc6' }}>G-buffer {stats.passMs.gbuffer.toFixed(2)}ms</div>}
+      {isHybridRayTracing && stats.passMs?.shadow != null && <div style={{ color: '#fc6' }}>shadow {stats.passMs.shadow.toFixed(2)}ms</div>}
+      {isHybridRayTracing && stats.passMs?.composite != null && <div style={{ color: '#fc6' }}>composite {stats.passMs.composite.toFixed(2)}ms</div>}
       {stats.splatCount > 0 && <div>{formatCount(stats.splatCount)} splats</div>}
       {stats.splatCount > 0 && stats.reductionMode === 'culled' && (
         <div style={{ color: '#6cf' }}>
@@ -189,6 +201,9 @@ export default function App(){
   const isVisualTest = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('test')
   const [backend, setBackend] = useState(isVisualTest ? 'webgpu' : 'webgl')
   const [renderMode, setRenderMode] = useState('raster')
+  const [hasRayScene, setHasRayScene] = useState(false)
+  const [hasHybridScene, setHasHybridScene] = useState(false)
+  const [rayPaused, setRayPaused] = useState(false)
   const [error, setError] = useState(null)
   const [textured, setTextured] = useState(false)
   const [currentShape, setCurrentShape] = useState('cube')
@@ -313,6 +328,9 @@ export default function App(){
     setSplatSort('bitonic')
     setSplatReduction('none')
     setFlipSplatY(true)
+    setHasRayScene(false)
+    setHasHybridScene(false)
+    setRayPaused(false)
   }, [backend])
 
   // Apply the splat debug mode to the active engine.
@@ -393,6 +411,8 @@ export default function App(){
       .then(async () => {
         if (cancelled) return
         await rayCoordinatorRef.current?.setSceneAsset(null)
+        setHasRayScene(false)
+        setHasHybridScene(false)
         setError(null)
       })
       .catch((e) => { if (!cancelled) setError(e?.message || String(e)) })
@@ -408,6 +428,8 @@ export default function App(){
       await rayCoordinatorRef.current?.setRenderMode('raster')
       const drawable = await loadSampleGltf({ engine })
       await rayCoordinatorRef.current?.setSceneAsset(drawable)
+      setHasRayScene(true)
+      setHasHybridScene(true)
       setHasModelLoaded(true)
       setError(null)
     } catch (err) {
@@ -446,7 +468,10 @@ export default function App(){
         if (!files?.length) return
         ;({ kind, drawable } = await loadAssetFiles({ engine, files, flipY: flipSplatY }))
       }
-      await rayCoordinatorRef.current?.setSceneAsset(drawable?.rayTracing ? drawable : null)
+      const rayTraceable = !!drawable?.rayTracing
+      await rayCoordinatorRef.current?.setSceneAsset(rayTraceable ? drawable : null)
+      setHasRayScene(rayTraceable)
+      setHasHybridScene(rayTraceable)
       setSplatLoaded(kind === 'splat')
       setHasModelLoaded(true)
       setError(null)
@@ -467,6 +492,8 @@ export default function App(){
       await rayCoordinatorRef.current?.setRenderMode('raster')
       await resetSceneOp({ engine, geometryFactory })
       await rayCoordinatorRef.current?.setSceneAsset(null)
+      setHasRayScene(false)
+      setHasHybridScene(false)
       setHasModelLoaded(false)
       setCurrentShape('cube')
       setTextured(false)
@@ -494,6 +521,9 @@ export default function App(){
       setHasModelLoaded(true)
       setSplatLoaded(false)
       setCurrentShape(null)
+      setHasRayScene(true)
+      setHasHybridScene(false)
+      setRayPaused(false)
       setError(null)
     } catch (err) {
       setError(`CPU Ray Tracing Error: ${err?.message || String(err)}`)
@@ -511,6 +541,9 @@ export default function App(){
       setHasModelLoaded(true)
       setSplatLoaded(false)
       setCurrentShape(null)
+      setHasRayScene(true)
+      setHasHybridScene(false)
+      setRayPaused(false)
       setError(null)
     } catch (err) {
       setError(`GPU Ray Tracing Error: ${err?.message || String(err)}`)
@@ -526,6 +559,30 @@ export default function App(){
     } catch (err) {
       setError(err?.message || String(err))
     }
+  }
+
+  async function selectRayRenderMode(nextMode) {
+    const coordinator = rayCoordinatorRef.current
+    if (!coordinator) return
+    try {
+      await coordinator.setRenderMode(nextMode)
+      setRayPaused(false)
+      setError(null)
+    } catch (err) {
+      setError(`Ray Tracing Error: ${err?.message || String(err)}`)
+    }
+  }
+
+  function toggleRayPause() {
+    const coordinator = rayCoordinatorRef.current
+    if (!coordinator) return
+    if (rayPaused) coordinator.resume()
+    else coordinator.pause()
+    setRayPaused((value) => !value)
+  }
+
+  function resetRayAccumulation() {
+    rayCoordinatorRef.current?.resetAccumulation()
   }
 
   // Handlers to apply edits
@@ -885,9 +942,17 @@ export default function App(){
               <a href="#" style={backend === 'webgl' && renderMode === 'raster' ? {fontWeight:'bold'} : {}} onClick={(e) => selectRasterBackend(e, 'webgl')}>WebGL</a>
               <a href="#" style={backend === 'webgpu' && renderMode === 'raster' ? {fontWeight:'bold'} : {}} onClick={(e) => selectRasterBackend(e, 'webgpu')}>WebGPU</a>
               <div className="menu-separator"></div>
-              <div className="menu-label" style={{padding:'4px 12px',opacity:0.6,fontSize:'0.8em',userSelect:'none'}}>Ray Tracing</div>
-              <a href="#" style={renderMode === 'raytrace-cpu' ? {fontWeight:'bold'} : {}} onClick={handleCornellBox}>CPU · Cornell Box</a>
-              <a href="#" className={backend !== 'webgpu' ? 'disabled' : ''} style={renderMode === 'raytrace-gpu' ? {fontWeight:'bold'} : {}} onClick={handleGpuCornellBox}>GPU · Cornell Box</a>
+              <RayTracingControls
+                backend={backend}
+                renderMode={renderMode}
+                hasRayScene={hasRayScene}
+                hasHybridScene={hasHybridScene}
+                capabilities={rayCoordinatorRef.current?.getCapabilities?.() || {}}
+                paused={rayPaused}
+                onSelectMode={selectRayRenderMode}
+                onTogglePause={toggleRayPause}
+                onResetAccumulation={resetRayAccumulation}
+              />
               {splatLoaded && (
                 <>
                   <div className="menu-separator"></div>
