@@ -1,4 +1,4 @@
-import { createIdentityMatrix, multiplyMatrices, createPerspectiveMatrix, translateMatrix, rotateMatrix, createLookAtMatrix, invertMatrix, transformPoint, transformDirection } from '../scripts/engine/matrix.js';
+import { composeTRSMatrix, createIdentityMatrix, multiplyMatrices, createPerspectiveMatrix, translateMatrix, rotateMatrix, createLookAtMatrix, invertMatrix, transformPoint, transformDirection } from '../scripts/engine/matrix.js';
 
 describe('Matrix Functions', () => {
   test('createIdentityMatrix should return an identity matrix', () => {
@@ -106,5 +106,17 @@ describe('Matrix Functions', () => {
     translateMatrix(matrix, [2, 3, 4]);
     expect(transformPoint(matrix, [1, 1, 1])).toEqual([3, 4, 5]);
     expect(transformDirection(matrix, [1, 1, 1])).toEqual([1, 1, 1]);
+  });
+
+  test('composeTRSMatrix follows glTF T * R * S order', () => {
+    const matrix = composeTRSMatrix(
+      [10, 0, 0],
+      [0, 0, Math.SQRT1_2, Math.SQRT1_2],
+      [2, 3, 4],
+    );
+    const point = transformPoint(matrix, [1, 1, 1]);
+    expect(point[0]).toBeCloseTo(7);
+    expect(point[1]).toBeCloseTo(2);
+    expect(point[2]).toBeCloseTo(4);
   });
 });

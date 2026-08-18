@@ -1,4 +1,5 @@
-import { assetToRayScene, parseGltfAsset, parseGltfForBackend } from '../scripts/engine/gltf-parser.js';
+import { assetToRasterPrimitives, assetToRayScene, parseGltfAsset, parseGltfForBackend } from '../scripts/engine/gltf-parser.js';
+import { transformPoint } from '../scripts/engine/matrix.js';
 import { validateRayScene } from '../scripts/engine/raytracing/core/ray-scene.js';
 
 function file(bytes) {
@@ -41,6 +42,74 @@ function singleTriangleFiles() {
   ]);
 }
 
+function instancedSceneFiles({ selectUnsupportedScene = false, cycle = false } = {}) {
+  const binary = new ArrayBuffer(160);
+  new Float32Array(binary, 0, 9).set([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+  new Float32Array(binary, 36, 9).set([0, 0, 1, 0, 0, 1, 0, 0, 1]);
+  new Uint16Array(binary, 72, 3).set([0, 1, 2]);
+  new Float32Array(binary, 80, 9).set([0, 0, 1, 1, 0, 1, 0, 1, 1]);
+  new Float32Array(binary, 116, 9).set([0, 1, 0, 0, 1, 0, 0, 1, 0]);
+  new Uint16Array(binary, 152, 3).set([0, 1, 2]);
+  const gltf = {
+    asset: { version: '2.0' },
+    scene: selectUnsupportedScene ? 0 : 1,
+    scenes: [{ nodes: [2] }, { nodes: [0] }],
+    nodes: [
+      {
+        name: 'scaled-parent',
+        mesh: 0,
+        children: [1],
+        translation: [10, 0, 0],
+        rotation: [0, 0, Math.SQRT1_2, Math.SQRT1_2],
+        scale: [2, 3, 4],
+      },
+      {
+        name: 'matrix-child',
+        mesh: 0,
+        children: cycle ? [0] : [],
+        matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1],
+        translation: [999, 999, 999],
+      },
+      { name: 'unselected-lines', mesh: 1 },
+    ],
+    buffers: [{ uri: 'scene.bin', byteLength: 160 }],
+    bufferViews: [
+      { buffer: 0, byteOffset: 0, byteLength: 36 },
+      { buffer: 0, byteOffset: 36, byteLength: 36 },
+      { buffer: 0, byteOffset: 72, byteLength: 6 },
+      { buffer: 0, byteOffset: 80, byteLength: 36 },
+      { buffer: 0, byteOffset: 116, byteLength: 36 },
+      { buffer: 0, byteOffset: 152, byteLength: 6 },
+    ],
+    accessors: [
+      { bufferView: 0, componentType: 5126, count: 3, type: 'VEC3' },
+      { bufferView: 1, componentType: 5126, count: 3, type: 'VEC3' },
+      { bufferView: 2, componentType: 5123, count: 3, type: 'SCALAR' },
+      { bufferView: 3, componentType: 5126, count: 3, type: 'VEC3' },
+      { bufferView: 4, componentType: 5126, count: 3, type: 'VEC3' },
+      { bufferView: 5, componentType: 5123, count: 3, type: 'SCALAR' },
+    ],
+    materials: [
+      { pbrMetallicRoughness: { baseColorFactor: [1, 0, 0, 1], metallicFactor: 0, roughnessFactor: 0.8 } },
+      { pbrMetallicRoughness: { baseColorFactor: [0, 0, 1, 1], metallicFactor: 0.2, roughnessFactor: 0.4 } },
+    ],
+    meshes: [
+      { name: 'instanced-pair', primitives: [
+        { attributes: { POSITION: 0, NORMAL: 1 }, indices: 2, material: 0 },
+        { attributes: { POSITION: 3, NORMAL: 4 }, indices: 5, material: 1 },
+      ] },
+      { name: 'ignored-lines', primitives: [
+        { mode: 1, attributes: { POSITION: 0, NORMAL: 1 }, indices: 2, material: 0 },
+      ] },
+    ],
+  };
+  const jsonBytes = new TextEncoder().encode(JSON.stringify(gltf));
+  return new Map([
+    ['nested/scene.gltf', file(jsonBytes)],
+    ['nested/scene.bin', file(binary)],
+  ]);
+}
+
 function webgl() {
   return {
     ARRAY_BUFFER: 0x8892,
@@ -79,6 +148,48 @@ describe('glTF parser/data split', () => {
     expect(validateRayScene(asset.rayScene)).toEqual({ ok: true, errors: [] });
     expect(asset.rayScene.geometries).toHaveLength(1);
     expect(asset.rayScene.instances).toHaveLength(1);
+  });
+
+  test('expands the selected static scene while sharing instanced local geometry', async () => {
+    const asset = await parseGltfAsset(instancedSceneFiles());
+
+    expect(asset.defaultSceneIndex).toBe(1);
+    expect(asset.scenes).toEqual([{ rootNodeIndices: [2] }, { rootNodeIndices: [0] }]);
+    expect(asset.nodes.map((node) => node.sourceNodeIndex)).toEqual([0, 1]);
+    expect(asset.meshes[1].primitives).toEqual([]); // The unselected scene is not traversed.
+    expect(asset.materials).toHaveLength(2);
+    expect(asset.rasterPrimitives).toHaveLength(4);
+    expect(assetToRasterPrimitives(asset)).toBe(asset.rasterPrimitives);
+
+    const [parentFirst, parentSecond, childFirst, childSecond] = asset.rasterPrimitives;
+    expect(parentFirst.positions).toBe(childFirst.positions);
+    expect(parentSecond.positions).toBe(childSecond.positions);
+    expect(parentFirst.positions).not.toBe(parentSecond.positions);
+    expect(parentFirst.materialIndex).toBe(0);
+    expect(parentSecond.materialIndex).toBe(1);
+    expect(transformPoint(parentFirst.worldMatrix, [0, 0, 0])).toEqual([10, 0, 0]);
+    const childOrigin = transformPoint(childFirst.worldMatrix, [0, 0, 0]);
+    expect(childOrigin[0]).toBeCloseTo(10);
+    expect(childOrigin[1]).toBeCloseTo(2);
+    expect(childOrigin[2]).toBeCloseTo(0);
+
+    expect(validateRayScene(asset.rayScene)).toEqual({ ok: true, errors: [] });
+    expect(asset.rayScene.geometries).toHaveLength(2);
+    expect(asset.rayScene.instances.map((instance) => instance.geometryIndex)).toEqual([0, 1, 0, 1]);
+    expect(asset.rayScene.instances.map((instance) => instance.materialIndex)).toEqual([0, 1, 0, 1]);
+    expect(asset.bounds.center[0]).toBeCloseTo(8.5);
+    expect(asset.bounds.center[1]).toBeCloseTo(2);
+    expect(asset.bounds.center[2]).toBeCloseTo(2);
+  });
+
+  test('rejects unsupported modes only when their scene is selected', async () => {
+    await expect(parseGltfAsset(instancedSceneFiles({ selectUnsupportedScene: true })))
+      .rejects.toThrow(/unsupported mode 1.*TRIANGLES/);
+  });
+
+  test('detects cycles in the selected node graph', async () => {
+    await expect(parseGltfAsset(instancedSceneFiles({ cycle: true })))
+      .rejects.toThrow(/Cycle detected.*node 0/);
   });
 
   test('uploads the same retained asset contract to WebGL', async () => {

@@ -9,6 +9,51 @@ export function createIdentityMatrix() {
 }
 
 /**
+ * Composes a glTF node transform as T * R * S.
+ * Quaternions use glTF's [x, y, z, w] order.
+ */
+export function composeTRSMatrix(
+    translation = [0, 0, 0],
+    rotation = [0, 0, 0, 1],
+    scale = [1, 1, 1],
+) {
+    if (translation.length !== 3 || rotation.length !== 4 || scale.length !== 3) {
+        throw new Error('TRS requires translation[3], rotation[4], and scale[3].');
+    }
+    const values = [...translation, ...rotation, ...scale];
+    if (!values.every(Number.isFinite)) throw new Error('TRS values must be finite.');
+
+    let [x, y, z, w] = rotation;
+    const quaternionLength = Math.hypot(x, y, z, w);
+    if (quaternionLength < 1e-12) throw new Error('TRS rotation quaternion must not be zero length.');
+    x /= quaternionLength;
+    y /= quaternionLength;
+    z /= quaternionLength;
+    w /= quaternionLength;
+
+    const x2 = x + x;
+    const y2 = y + y;
+    const z2 = z + z;
+    const xx = x * x2;
+    const xy = x * y2;
+    const xz = x * z2;
+    const yy = y * y2;
+    const yz = y * z2;
+    const zz = z * z2;
+    const wx = w * x2;
+    const wy = w * y2;
+    const wz = w * z2;
+    const [sx, sy, sz] = scale;
+
+    return new Float32Array([
+        (1 - yy - zz) * sx, (xy + wz) * sx, (xz - wy) * sx, 0,
+        (xy - wz) * sy, (1 - xx - zz) * sy, (yz + wx) * sy, 0,
+        (xz + wy) * sz, (yz - wx) * sz, (1 - xx - yy) * sz, 0,
+        translation[0], translation[1], translation[2], 1,
+    ]);
+}
+
+/**
  * Returns the inverse of a column-major 4x4 matrix.
  * @param {ArrayLike<number>} matrix
  * @returns {Float32Array}

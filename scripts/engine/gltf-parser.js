@@ -4,7 +4,7 @@
  * @license MIT
  */
 
-import { createIdentityMatrix } from './matrix.js';
+import { composeTRSMatrix, createIdentityMatrix, multiplyMatrices } from './matrix.js';
 import { prepareRayScene } from './raytracing/core/ray-scene.js';
 import { uploadGltfWebGL, uploadGltfWebGPU } from './gltf-upload.js';
 
@@ -45,9 +45,61 @@ export function getBufferViewData(bufferData, bufferView, accessor) {
     }
 }
 
-/** Converts the retained single-primitive asset into the shared ray-scene contract. */
+function defaultMaterial() {
+    return {
+        baseColor: [1, 1, 1, 1],
+        emissive: [0, 0, 0],
+        emissiveStrength: 1,
+        metallic: 1,
+        roughness: 1,
+        baseColorImageIndex: -1,
+        alphaMode: 'OPAQUE',
+        doubleSided: false,
+    };
+}
+
+/** Converts retained glTF scene data into the shared ray-scene contract. */
 export function assetToRayScene(asset) {
     if (asset.rayScene) return asset.rayScene;
+    if (asset.meshes && asset.nodes) {
+        const geometries = [];
+        const instances = [];
+        const geometryIndices = new Map();
+        for (const node of asset.nodes) {
+            if (!Number.isInteger(node.meshIndex) || node.meshIndex < 0) continue;
+            const mesh = asset.meshes[node.meshIndex];
+            if (!mesh) throw new Error(`Node ${node.sourceNodeIndex} references missing mesh ${node.meshIndex}.`);
+            mesh.primitives.forEach((primitive, primitiveIndex) => {
+                const key = `${node.meshIndex}:${primitiveIndex}`;
+                let geometryIndex = geometryIndices.get(key);
+                if (geometryIndex == null) {
+                    geometryIndex = geometries.length;
+                    geometryIndices.set(key, geometryIndex);
+                    geometries.push({
+                        id: geometryIndex,
+                        revision: 0,
+                        positions: primitive.positions,
+                        normals: primitive.normals,
+                        texCoords: primitive.texCoords,
+                        indices: primitive.indices,
+                    });
+                }
+                instances.push({
+                    id: instances.length,
+                    geometryIndex,
+                    materialIndex: primitive.materialIndex,
+                    worldMatrix: node.worldMatrix,
+                });
+            });
+        }
+        return prepareRayScene({
+            geometries,
+            instances,
+            materials: asset.materials,
+            lights: [],
+            environment: { color: [0, 0, 0] },
+        });
+    }
     return prepareRayScene({
         geometries: [{
             id: 0,
@@ -63,10 +115,42 @@ export function assetToRayScene(asset) {
             materialIndex: 0,
             worldMatrix: createIdentityMatrix(),
         }],
-        materials: [asset.material || { baseColor: [1, 1, 1, 1] }],
+        materials: [asset.material || defaultMaterial()],
         lights: [],
         environment: { color: [0, 0, 0] },
     });
+}
+
+/** Creates one raster draw payload per (scene node, mesh primitive) reference. */
+export function assetToRasterPrimitives(asset) {
+    if (asset.rasterPrimitives) return asset.rasterPrimitives;
+    if (!asset.meshes || !asset.nodes) return [];
+    const primitives = [];
+    for (const node of asset.nodes) {
+        if (!Number.isInteger(node.meshIndex) || node.meshIndex < 0) continue;
+        const mesh = asset.meshes[node.meshIndex];
+        if (!mesh) throw new Error(`Node ${node.sourceNodeIndex} references missing mesh ${node.meshIndex}.`);
+        for (const primitive of mesh.primitives) {
+            const material = asset.materials[primitive.materialIndex];
+            const imageIndex = material?.baseColorImageIndex ?? -1;
+            primitives.push({
+                positions: primitive.positions,
+                normals: primitive.normals,
+                texCoords: primitive.texCoords,
+                indices: primitive.indices,
+                indicesComponentType: primitive.indicesComponentType,
+                materialIndex: primitive.materialIndex,
+                material,
+                imageIndex,
+                textureBitmap: imageIndex >= 0 ? asset.images?.[imageIndex] || null : null,
+                worldMatrix: node.worldMatrix,
+                sourceNodeIndex: node.sourceNodeIndex,
+                sourceMeshIndex: node.meshIndex,
+                sourcePrimitiveIndex: primitive.sourcePrimitiveIndex,
+            });
+        }
+    }
+    return primitives;
 }
 
 /**
@@ -112,6 +196,49 @@ function resolveLocalFile(localFileMap, fullPath) {
         if (key.split('/').pop() === base) return file;
     }
     return null;
+}
+
+function retainMaterial(gltfJson, material = {}) {
+    const pbr = material.pbrMetallicRoughness || {};
+    const textureIndex = pbr.baseColorTexture?.index;
+    const texture = textureIndex != null ? gltfJson.textures?.[textureIndex] : null;
+    const baseColorImageIndex = Number.isInteger(texture?.source) ? texture.source : -1;
+    return {
+        baseColor: [...(pbr.baseColorFactor || [1, 1, 1, 1])],
+        emissive: [...(material.emissiveFactor || [0, 0, 0])],
+        emissiveStrength: material.extensions?.KHR_materials_emissive_strength?.emissiveStrength ?? 1,
+        metallic: pbr.metallicFactor ?? 1,
+        roughness: pbr.roughnessFactor ?? 1,
+        baseColorImageIndex,
+        alphaMode: material.alphaMode || 'OPAQUE',
+        doubleSided: material.doubleSided === true,
+    };
+}
+
+function nodeLocalMatrix(node, nodeIndex) {
+    if (node.matrix != null) {
+        if (!Array.isArray(node.matrix) || node.matrix.length !== 16 || !node.matrix.every(Number.isFinite)) {
+            throw new Error(`Node ${nodeIndex} matrix must contain 16 finite values.`);
+        }
+        return new Float32Array(node.matrix);
+    }
+    try {
+        return composeTRSMatrix(node.translation, node.rotation, node.scale);
+    } catch (error) {
+        throw new Error(`Node ${nodeIndex} has an invalid TRS transform: ${error.message}`);
+    }
+}
+
+function requireTightAccessor(gltfJson, accessorIndex, label) {
+    const accessor = gltfJson.accessors?.[accessorIndex];
+    if (!accessor) throw new Error(`${label} references missing accessor ${accessorIndex}.`);
+    if (accessor.sparse) throw new Error(`${label} uses a sparse accessor; sparse accessors are deferred to RT-010A.`);
+    if (accessor.normalized) throw new Error(`${label} uses normalized integer data; normalized accessors are deferred to RT-010A.`);
+    const bufferView = gltfJson.bufferViews?.[accessor.bufferView];
+    if (!bufferView) throw new Error(`${label} references missing bufferView ${accessor.bufferView}.`);
+    if (bufferView.buffer !== 0) throw new Error(`${label} uses buffer ${bufferView.buffer}; multiple buffers are deferred to RT-010A.`);
+    if (bufferView.byteStride != null) throw new Error(`${label} uses byteStride; strided accessors are deferred to RT-010A.`);
+    return { accessor, bufferView };
 }
 
 /**
@@ -172,22 +299,11 @@ export async function parseGltfAsset(source) {
         throw new Error("GLTF file does not contain any meshes.");
     }
 
-    // For simplicity, we'll load the first primitive of the first mesh.
-    const mesh = gltfJson.meshes[0];
-    const primitive = mesh.primitives[0];
-
-    // Get accessor data for positions, normals, texcoords, and indices
-    const positionAccessor = gltfJson.accessors[primitive.attributes.POSITION];
-    const normalAccessor = gltfJson.accessors[primitive.attributes.NORMAL];
-    const texCoordAccessor = gltfJson.accessors[primitive.attributes.TEXCOORD_0];
-    const indicesAccessor = gltfJson.accessors[primitive.indices];
-
-    if (!positionAccessor || !normalAccessor || !indicesAccessor) {
-        throw new Error("Mesh is missing required attributes (POSITION, NORMAL, or indices).");
-    }
-
     // --- Buffers ---
-    // Assuming a single binary buffer for simplicity (like BoxTextured.bin)
+    if (!gltfJson.buffers?.length) throw new Error('GLTF file does not contain a buffer.');
+    if (gltfJson.buffers.length !== 1) {
+        throw new Error('Multiple glTF buffers are deferred to RT-010A.');
+    }
     const buffer = gltfJson.buffers[0];
     let binaryBufferData;
 
@@ -207,102 +323,198 @@ export async function parseGltfAsset(source) {
         throw new Error("Embedded GLTF buffers are not yet supported by this simple loader.");
     }
 
-    const bufferViews = gltfJson.bufferViews;
+    const retainedMaterials = (gltfJson.materials || []).map((material) => retainMaterial(gltfJson, material));
+    let defaultMaterialIndex = -1;
+    const getMaterialIndex = (primitive, label) => {
+        if (primitive.material == null) {
+            if (defaultMaterialIndex < 0) {
+                defaultMaterialIndex = retainedMaterials.length;
+                retainedMaterials.push(defaultMaterial());
+            }
+            return defaultMaterialIndex;
+        }
+        if (!Number.isInteger(primitive.material) || !retainedMaterials[primitive.material]) {
+            throw new Error(`${label} references missing material ${primitive.material}.`);
+        }
+        const textureIndex = gltfJson.materials[primitive.material]
+            ?.pbrMetallicRoughness?.baseColorTexture?.index;
+        if (textureIndex != null && !Number.isInteger(gltfJson.textures?.[textureIndex]?.source)) {
+            throw new Error(`${label} references missing base-color texture ${textureIndex}.`);
+        }
+        if (retainedMaterials[primitive.material].alphaMode !== 'OPAQUE') {
+            throw new Error(`${label} uses alpha mode ${retainedMaterials[primitive.material].alphaMode}; alpha materials are deferred to RT-010A.`);
+        }
+        return primitive.material;
+    };
 
-    const positions = getBufferViewData(binaryBufferData, bufferViews[positionAccessor.bufferView], positionAccessor);
-    const normals = getBufferViewData(binaryBufferData, bufferViews[normalAccessor.bufferView], normalAccessor);
-    const indices = getBufferViewData(binaryBufferData, bufferViews[indicesAccessor.bufferView], indicesAccessor);
-    let texCoords = null;
-    if (texCoordAccessor) {
-        texCoords = getBufferViewData(binaryBufferData, bufferViews[texCoordAccessor.bufferView], texCoordAccessor);
+    const meshes = gltfJson.meshes.map((mesh) => ({ name: mesh.name || '', primitives: [] }));
+    const parseMesh = (meshIndex) => {
+        const retainedMesh = meshes[meshIndex];
+        if (!retainedMesh) throw new Error(`Scene node references missing mesh ${meshIndex}.`);
+        if (retainedMesh.primitives.length) return retainedMesh;
+        const sourceMesh = gltfJson.meshes[meshIndex];
+        if (!sourceMesh.primitives?.length) throw new Error(`Mesh ${meshIndex} does not contain primitives.`);
+        retainedMesh.primitives = sourceMesh.primitives.map((primitive, primitiveIndex) => {
+            const label = `Mesh ${meshIndex} primitive ${primitiveIndex}`;
+            const mode = primitive.mode ?? 4;
+            if (mode !== 4) throw new Error(`${label} uses unsupported mode ${mode}; only TRIANGLES (4) is supported.`);
+            if (primitive.targets?.length) throw new Error(`${label} uses morph targets; morph targets are deferred to RT-010A.`);
+            if (primitive.attributes?.POSITION == null) throw new Error(`${label} omits POSITION.`);
+            if (primitive.attributes?.NORMAL == null) throw new Error(`${label} omits NORMAL; normal generation is deferred to RT-010A.`);
+            if (primitive.indices == null) throw new Error(`${label} omits indices; generated indices are deferred to RT-010A.`);
+
+            const position = requireTightAccessor(gltfJson, primitive.attributes.POSITION, `${label} POSITION`);
+            const normal = requireTightAccessor(gltfJson, primitive.attributes.NORMAL, `${label} NORMAL`);
+            const index = requireTightAccessor(gltfJson, primitive.indices, `${label} indices`);
+            if (position.accessor.type !== 'VEC3' || position.accessor.componentType !== 5126) {
+                throw new Error(`${label} POSITION must be a tightly packed FLOAT VEC3 accessor.`);
+            }
+            if (normal.accessor.type !== 'VEC3' || normal.accessor.componentType !== 5126) {
+                throw new Error(`${label} NORMAL must be a tightly packed FLOAT VEC3 accessor.`);
+            }
+            if (index.accessor.type !== 'SCALAR' || ![5121, 5123, 5125].includes(index.accessor.componentType)) {
+                throw new Error(`${label} indices must be an unsigned integer SCALAR accessor.`);
+            }
+            let texCoord = null;
+            if (primitive.attributes.TEXCOORD_0 != null) {
+                texCoord = requireTightAccessor(gltfJson, primitive.attributes.TEXCOORD_0, `${label} TEXCOORD_0`);
+                if (texCoord.accessor.type !== 'VEC2' || texCoord.accessor.componentType !== 5126) {
+                    throw new Error(`${label} TEXCOORD_0 must be a tightly packed FLOAT VEC2 accessor.`);
+                }
+            }
+
+            const positions = getBufferViewData(binaryBufferData, position.bufferView, position.accessor);
+            const normals = getBufferViewData(binaryBufferData, normal.bufferView, normal.accessor);
+            const indices = getBufferViewData(binaryBufferData, index.bufferView, index.accessor);
+            const texCoords = texCoord
+                ? getBufferViewData(binaryBufferData, texCoord.bufferView, texCoord.accessor)
+                : null;
+            if (normals.length !== positions.length) throw new Error(`${label} NORMAL count must match POSITION count.`);
+            if (texCoords && texCoords.length !== (positions.length / 3) * 2) {
+                throw new Error(`${label} TEXCOORD_0 count must match POSITION count.`);
+            }
+            if (indices.length % 3 !== 0) throw new Error(`${label} index count must be a multiple of three.`);
+
+            return {
+                sourcePrimitiveIndex: primitiveIndex,
+                mode,
+                attributes: { POSITION: positions, NORMAL: normals, TEXCOORD_0: texCoords },
+                positions,
+                normals,
+                texCoords,
+                indices,
+                indicesComponentType: index.accessor.componentType,
+                materialIndex: getMaterialIndex(primitive, label),
+            };
+        });
+        return retainedMesh;
+    };
+
+    const sourceNodes = gltfJson.nodes || [];
+    const sourceScenes = gltfJson.scenes || [];
+    const hasSceneGraph = sourceScenes.length > 0;
+    const defaultSceneIndex = hasSceneGraph ? (gltfJson.scene ?? 0) : 0;
+    if (hasSceneGraph && (!Number.isInteger(defaultSceneIndex) || !sourceScenes[defaultSceneIndex])) {
+        throw new Error(`GLTF default scene index ${defaultSceneIndex} is out of range.`);
+    }
+    const selectedRoots = hasSceneGraph ? (sourceScenes[defaultSceneIndex].nodes || []) : [0];
+    const nodes = [];
+    const visited = new Set();
+    const activePath = new Set();
+    const visitNode = (nodeIndex, parentWorld) => {
+        if (!Number.isInteger(nodeIndex) || !sourceNodes[nodeIndex]) throw new Error(`Scene references missing node ${nodeIndex}.`);
+        if (activePath.has(nodeIndex)) throw new Error(`Cycle detected at glTF node ${nodeIndex}.`);
+        if (visited.has(nodeIndex)) throw new Error(`glTF node ${nodeIndex} is referenced more than once in the selected scene.`);
+        activePath.add(nodeIndex);
+        visited.add(nodeIndex);
+        const sourceNode = sourceNodes[nodeIndex];
+        if (sourceNode.skin != null) throw new Error(`Node ${nodeIndex} uses a skin; skinning is deferred to RT-010A.`);
+        const localMatrix = nodeLocalMatrix(sourceNode, nodeIndex);
+        const worldMatrix = multiplyMatrices(parentWorld, localMatrix);
+        const meshIndex = sourceNode.mesh ?? -1;
+        if (!Number.isInteger(meshIndex) || meshIndex < -1) {
+            throw new Error(`Node ${nodeIndex} mesh index must be a non-negative integer.`);
+        }
+        if (meshIndex >= 0) parseMesh(meshIndex);
+        nodes.push({
+            sourceNodeIndex: nodeIndex,
+            name: sourceNode.name || '',
+            children: [...(sourceNode.children || [])],
+            localMatrix,
+            worldMatrix,
+            meshIndex,
+        });
+        for (const childIndex of sourceNode.children || []) visitNode(childIndex, worldMatrix);
+        activePath.delete(nodeIndex);
+    };
+
+    if (hasSceneGraph) {
+        for (const rootIndex of selectedRoots) visitNode(rootIndex, createIdentityMatrix());
+    } else {
+        parseMesh(0);
+        nodes.push({
+            sourceNodeIndex: 0,
+            name: '',
+            children: [],
+            localMatrix: createIdentityMatrix(),
+            worldMatrix: createIdentityMatrix(),
+            meshIndex: 0,
+        });
     }
 
-    // --- Texture (if it exists) ---
-    let textureBitmap = null;
-    const material = gltfJson.materials?.[primitive.material];
-    const pbr = material?.pbrMetallicRoughness || {};
-    const retainedMaterial = {
-        baseColor: [...(pbr.baseColorFactor || [1, 1, 1, 1])],
-        emissive: [...(material?.emissiveFactor || [0, 0, 0])],
-        emissiveStrength: material?.extensions?.KHR_materials_emissive_strength?.emissiveStrength || 0,
-        metallic: pbr.metallicFactor ?? 1,
-        roughness: pbr.roughnessFactor ?? 1,
-        baseColorImageIndex: pbr.baseColorTexture?.index ?? -1,
-    };
-    if (material && material.pbrMetallicRoughness && material.pbrMetallicRoughness.baseColorTexture) {
-        const textureInfo = material.pbrMetallicRoughness.baseColorTexture;
-        const gltfTexture = gltfJson.textures[textureInfo.index];
-        const imageSource = gltfJson.images[gltfTexture.source];
-        
-        if (imageSource.uri) {
-            let imageFile = null;
-            let imageUrl;
-            const imagePath = baseUrl + imageSource.uri;
-            const localImageFile = resolveLocalFile(localFileMap, imagePath);
-            if (localImageFile) {
-                imageFile = localImageFile;
-            } else if (baseUrl) {
-                imageUrl = baseUrl + imageSource.uri;
-            } else {
-                throw new Error(`Cannot resolve image URI: ${imageSource.uri}. baseUrl=${baseUrl || '(empty)'}; available files (sample): ${listAvailableFiles().join(', ')}`);
-            }
-
-            if (imageFile) {
-                textureBitmap = await createImageBitmap(imageFile);
-            } else {
-                const imageResponse = await fetch(imageUrl);
-                if (!imageResponse.ok) {
-                    throw new Error(`Failed to load texture from ${imageUrl}: ${imageResponse.status} ${imageResponse.statusText}`);
-                }
-                const imageBlob = await imageResponse.blob();
-                textureBitmap = await createImageBitmap(imageBlob);
-            }
-        } else {
-            throw new Error("Embedded GLTF images are not yet supported by this simple loader.");
+    const usedImageIndices = new Set();
+    for (const node of nodes) {
+        if (node.meshIndex < 0) continue;
+        for (const primitive of meshes[node.meshIndex].primitives) {
+            const imageIndex = retainedMaterials[primitive.materialIndex].baseColorImageIndex;
+            if (imageIndex >= 0) usedImageIndices.add(imageIndex);
         }
     }
-
-    // Compute bounds for camera framing (no scaling applied)
-    let minX = Infinity, minY = Infinity, minZ = Infinity;
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-    for (let i = 0; i < positions.length; i += 3) {
-        const x = positions[i];
-        const y = positions[i + 1];
-        const z = positions[i + 2];
-        if (x < minX) minX = x;
-        if (y < minY) minY = y;
-        if (z < minZ) minZ = z;
-        if (x > maxX) maxX = x;
-        if (y > maxY) maxY = y;
-        if (z > maxZ) maxZ = z;
-    }
-    const center = [(minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2];
-    const dx = maxX - minX;
-    const dy = maxY - minY;
-    const dz = maxZ - minZ;
-    const radius = Math.max(dx, dy, dz) / 2 || 1;
+    const images = new Array(gltfJson.images?.length || 0).fill(null);
+    await Promise.all([...usedImageIndices].map(async (imageIndex) => {
+        const imageSource = gltfJson.images?.[imageIndex];
+        if (!imageSource) throw new Error(`Material references missing image ${imageIndex}.`);
+        if (!imageSource.uri) throw new Error('Embedded GLTF images are deferred to RT-010A.');
+        const imagePath = baseUrl + imageSource.uri;
+        const localImageFile = resolveLocalFile(localFileMap, imagePath);
+        if (localImageFile) {
+            images[imageIndex] = await createImageBitmap(localImageFile);
+            return;
+        }
+        if (!baseUrl) {
+            throw new Error(`Cannot resolve image URI: ${imageSource.uri}. baseUrl=(empty); available files (sample): ${listAvailableFiles().join(', ')}`);
+        }
+        const imageResponse = await fetch(imagePath);
+        if (!imageResponse.ok) {
+            throw new Error(`Failed to load texture from ${imagePath}: ${imageResponse.status} ${imageResponse.statusText}`);
+        }
+        images[imageIndex] = await createImageBitmap(await imageResponse.blob());
+    }));
 
     const asset = {
         sourceName,
-        positions,
-        normals,
-        texCoords,
-        indices,
-        indicesComponentType: indicesAccessor.componentType,
-        textureBitmap,
-        material: retainedMaterial,
-        materials: [retainedMaterial],
-        bounds: { center, radius },
-        rasterPrimitives: [{
-            positions,
-            normals,
-            texCoords,
-            indices,
-            indicesComponentType: indicesAccessor.componentType,
-            materialIndex: 0,
-            worldMatrix: createIdentityMatrix(),
-        }],
+        scenes: hasSceneGraph
+            ? sourceScenes.map((scene) => ({ rootNodeIndices: [...(scene.nodes || [])] }))
+            : [{ rootNodeIndices: [0] }],
+        defaultSceneIndex,
+        nodes,
+        meshes,
+        materials: retainedMaterials,
+        images,
     };
+    asset.rasterPrimitives = assetToRasterPrimitives(asset);
+    if (!asset.rasterPrimitives.length) throw new Error('Selected glTF scene does not contain triangle primitives.');
     asset.rayScene = assetToRayScene(asset);
+    asset.bounds = asset.rayScene.bounds;
+
+    // Legacy aliases keep existing single-primitive upload paths working until RT-010B.
+    const firstPrimitive = asset.rasterPrimitives[0];
+    asset.positions = firstPrimitive.positions;
+    asset.normals = firstPrimitive.normals;
+    asset.texCoords = firstPrimitive.texCoords;
+    asset.indices = firstPrimitive.indices;
+    asset.indicesComponentType = firstPrimitive.indicesComponentType;
+    asset.material = firstPrimitive.material;
+    asset.textureBitmap = firstPrimitive.textureBitmap;
     return asset;
 }
