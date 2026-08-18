@@ -204,9 +204,9 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
             forceUpdate({ reinitScript: false });
         },
 
-        setSplatShaders(splatWgsl, sortWgsl, cullWgsl) {
+        setSplatShaders(splatWgsl, sortWgsl, cullWgsl, radixWgsl) {
             if (!splatWgsl || !sortWgsl) return;
-            splatRenderer.setShaders(splatWgsl, sortWgsl, cullWgsl);
+            splatRenderer.setShaders(splatWgsl, sortWgsl, cullWgsl, radixWgsl);
             if (drawable?.kind === 'splat') splatRenderer.prepare(drawable);
             forceUpdate();
         },
@@ -214,6 +214,13 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
         setSplatReduction(mode) {
             splatRenderer.setReduction(mode);
             if (drawable?.kind === 'splat') splatRenderer.prepare(drawable);
+            forceUpdate();
+        },
+
+        setSplatSort(mode) {
+            // setSort() re-prepares internally (the render bind group holds the
+            // active backend's index buffer), so no prepare() call here.
+            splatRenderer.setSort(mode);
             forceUpdate();
         },
 
@@ -254,6 +261,7 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
                 triangleCount: drawable?.kind === 'mesh' ? drawable.vertexCount / 3 : 0,
                 splatCount: total,
                 reductionMode: info?.mode ?? 'none',
+                sortMode: info?.sort ?? 'bitonic',
                 // Splats actually drawn after reduction (== total when not culling).
                 visibleSplats: (info && info.visible >= 0) ? info.visible : total,
                 passMs: gpuTimer.getDurations(), // { sort?, reduce? } in ms, GPU timestamp based

@@ -233,6 +233,11 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
         scene.setSplatReduction(mode);
     }
 
+    /** Set the ordering sort axis: 'bitonic' or 'radix'. */
+    function setSplatSort(mode) {
+        scene.setSplatSort(mode);
+    }
+
     if (!shaderSources?.wgsl) {
         errorHandler(new Error('Missing WGSL shader source.'));
         return null;
@@ -240,7 +245,12 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
 
     setShaders(shaderSources.wgsl);
     if (shaderSources.splatWgsl && shaderSources.splatSortWgsl) {
-        scene.setSplatShaders(shaderSources.splatWgsl, shaderSources.splatSortWgsl, shaderSources.splatCullWgsl);
+        scene.setSplatShaders(
+            shaderSources.splatWgsl,
+            shaderSources.splatSortWgsl,
+            shaderSources.splatCullWgsl,
+            shaderSources.splatRadixWgsl,
+        );
     }
     if (shaderSources.blitWgsl && shaderSources.tileRenderWgsl) {
         scene.setTileShaders(shaderSources.blitWgsl, shaderSources.tileRenderWgsl);
@@ -251,7 +261,7 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
     return {
         device, scene, camera,
         setShaders, setScriptSource,
-        loadSplats, setSplatFlipY, loadMesh, setSplatDebugMode, setSplatShDegree, setSplatRenderMode, setSplatReduction,
+        loadSplats, setSplatFlipY, loadMesh, setSplatDebugMode, setSplatShDegree, setSplatRenderMode, setSplatReduction, setSplatSort,
         getStats: () => scene.getStats(),
         destroy: () => {
             if (splatLoader) splatLoader.destroy();
