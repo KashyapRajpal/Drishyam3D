@@ -8,6 +8,16 @@ export function createRayTracingCoordinator({ cpuCanvas, cpuFactory, onModeChang
     let destroyed = false;
     let cornellLoaded = false;
 
+    function capabilities() {
+        return {
+            raster: { available: !!rasterEngine },
+            'raytrace-cpu': {
+                available: typeof Worker !== 'undefined' && !!cpuCanvas.getContext,
+                reason: typeof Worker === 'undefined' ? 'Web Workers are unavailable.' : undefined,
+            },
+        };
+    }
+
     async function ensureCpuEngine() {
         if (destroyed) throw new Error('Ray tracing coordinator has been destroyed.');
         if (cpuEngine) return cpuEngine;
@@ -27,15 +37,7 @@ export function createRayTracingCoordinator({ cpuCanvas, cpuFactory, onModeChang
     }
 
     return {
-        getCapabilities() {
-            return {
-                raster: { available: !!rasterEngine },
-                'raytrace-cpu': {
-                    available: typeof Worker !== 'undefined' && !!cpuCanvas.getContext,
-                    reason: typeof Worker === 'undefined' ? 'Web Workers are unavailable.' : undefined,
-                },
-            };
-        },
+        getCapabilities: capabilities,
         setRasterEngine(engine) {
             rasterEngine = engine;
             if (mode === 'raytrace-cpu') rasterEngine?.scene?.pause?.();
@@ -54,9 +56,9 @@ export function createRayTracingCoordinator({ cpuCanvas, cpuFactory, onModeChang
             }
             if (nextMode === mode) return;
             if (nextMode === 'raytrace-cpu') {
-                const capabilities = this.getCapabilities()['raytrace-cpu'];
-                if (!capabilities.available) {
-                    const error = new Error(capabilities.reason);
+                const cpuCapabilities = capabilities()['raytrace-cpu'];
+                if (!cpuCapabilities.available) {
+                    const error = new Error(cpuCapabilities.reason);
                     error.code = 'UNSUPPORTED_RENDER_MODE';
                     throw error;
                 }
