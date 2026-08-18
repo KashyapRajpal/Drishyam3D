@@ -1440,18 +1440,34 @@ Implementation status:
 | RT-005A | Complete | `46c90d6`; TLAS/BLAS/intersection focused tests, including 1,000 seeded rays |
 | RT-006 | Complete | `dd9b25e`; RNG/integrator focused tests, deterministic lighting and shadow cases |
 | RT-007 | Complete | `b3fe56a`, `694c092`; worker/controller tests including stale generations and instance updates |
-| RT-008 through RT-010 | Not started | — |
+| RT-008 | Complete | `e6ba12e`; exact byte-layout/rebase and transform-only repack tests |
+| RT-009 | Not started | — |
+| RT-010 | Not started | — |
 | RT-010A | Not started | — |
 | RT-010B | Not started | — |
-| RT-011 through RT-015 | Not started | — |
+| RT-011 | Complete | `14e2913`, `974c710`; mocked limits, buffers, layouts, ping-pong, readback usage, and cleanup tests |
+| RT-012 | Complete | `8c9255d`; lifecycle/two-pass tests and Chrome WGSL/pipeline validation |
+| RT-013 | In progress | `2d62736`; multi-bounce/SPF/revision/readback tests and Chrome validation complete; automated CPU/GPU numeric tolerance gate remains |
+| RT-014 | Complete | `0cb68c9`; facade/registry tests, BLAS reuse/TLAS-prefix uploads, full Jest suite, and UI build |
+| RT-015 | Not started | — |
 | RT-015A | Not started | — |
 | RT-016 | In progress | `c310f73`, `10d9c4d`; Cornell CPU facade/coordinator complete; glTF asset path awaits RT-010A |
 | RT-016A | Complete | `afa4616`; UI build plus Chrome CPU↔raster smoke test with separate canvases |
-| RT-017 | In progress | `afa4616`; Cornell example and CPU stats exposed; full GPU/hybrid controls remain |
+| RT-017 | In progress | `afa4616`, `2bd7fba`; CPU/GPU Cornell examples and stats exposed; hybrid controls remain |
 | RT-018 | Not started | — |
 
 Split this row as packets begin. Use only `Not started`, `In progress`, `Blocked`, or
 `Complete`; link the completing commit/PR and name the verification commands in Evidence.
+
+GPU Cornell visual checkpoint (2026-08-18): Chrome `151.0.7922.138` on macOS with an
+AMD Radeon Pro 5500M/Intel UHD 630 system rendered the `916 x 824` canvas at `64` SPP,
+four bounces, and fixed seed `0x12345678`. The frame showed the complete Cornell room,
+emissive ceiling rectangle, both instanced boxes, hard shadows, and diffuse red/green
+color bleeding. Browser capture reported no page/console errors; renderer diagnostics
+reported zero stack overflows and non-finite samples. Attach
+`/tmp/drishyam-gpu-cornell-64spp.png` to the PR rather than committing it. The smoke path
+was `Examples -> Cornell Box · GPU`; the production UI build and all `35` Jest suites
+(`250` tests) passed at this checkpoint.
 
 ## Implementation phases
 
