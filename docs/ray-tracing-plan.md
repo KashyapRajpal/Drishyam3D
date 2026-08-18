@@ -1424,14 +1424,17 @@ Implementation status:
 | RT-004 | Complete | `fe34b29`; `npm test -- --runInBand __tests__/intersections.test.js` |
 | RT-005 | Complete | `dcc422b`; BVH/BLAS/intersection focused tests, including 1,000 seeded rays |
 | RT-005A | Complete | `46c90d6`; TLAS/BLAS/intersection focused tests, including 1,000 seeded rays |
-| RT-006 through RT-010 | Not started | — |
+| RT-006 | Complete | `dd9b25e`; RNG/integrator focused tests, deterministic lighting and shadow cases |
+| RT-007 | Complete | `b3fe56a`, `694c092`; worker/controller tests including stale generations and instance updates |
+| RT-008 through RT-010 | Not started | — |
 | RT-010A | Not started | — |
 | RT-010B | Not started | — |
 | RT-011 through RT-015 | Not started | — |
 | RT-015A | Not started | — |
-| RT-016 | Not started | — |
-| RT-016A | Not started | — |
-| RT-017 through RT-018 | Not started | — |
+| RT-016 | In progress | `c310f73`, `10d9c4d`; Cornell CPU facade/coordinator complete; glTF asset path awaits RT-010A |
+| RT-016A | Complete | `afa4616`; UI build plus Chrome CPU↔raster smoke test with separate canvases |
+| RT-017 | In progress | `afa4616`; Cornell example and CPU stats exposed; full GPU/hybrid controls remain |
+| RT-018 | Not started | — |
 
 Split this row as packets begin. Use only `Not started`, `In progress`, `Blocked`, or
 `Complete`; link the completing commit/PR and name the verification commands in Evidence.
