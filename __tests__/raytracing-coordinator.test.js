@@ -37,7 +37,7 @@ describe('ray tracing coordinator', () => {
   });
 
   test('rejects unsupported modes and destroys CPU once', async () => {
-    const cpu = { loadCornellBox: jest.fn(), destroy: jest.fn() };
+    const cpu = { loadCornellBox: jest.fn(() => ({ name: 'Cornell' })), destroy: jest.fn() };
     const coordinator = createRayTracingCoordinator({ cpuCanvas: canvas(), cpuFactory: async () => cpu });
     await expect(coordinator.setRenderMode('raytrace-gpu')).rejects.toMatchObject({ code: 'UNSUPPORTED_RENDER_MODE' });
     await coordinator.loadCornellBox();
@@ -47,17 +47,19 @@ describe('ray tracing coordinator', () => {
   });
 
   test('switches between retained GPU Cornell, CPU Cornell, and raster loops', async () => {
+    const cornellScene = { name: 'Cornell' };
     const raster = {
       scene: { pause: jest.fn(), resume: jest.fn() },
       getCapabilities: jest.fn(() => ({ 'raytrace-gpu': { available: true } })),
-      loadCornellBox: jest.fn(() => ({ kind: 'raytrace' })),
+      loadCornellBox: jest.fn(() => ({ kind: 'raytrace', scene: cornellScene })),
       setRenderMode: jest.fn(async () => {}),
       setRayTracingSettings: jest.fn(),
       resetAccumulation: jest.fn(),
       getStats: jest.fn(() => ({ backend: 'webgpu', renderMode: 'raytrace-gpu', spp: 4 })),
     };
     const cpu = {
-      loadCornellBox: jest.fn(), resume: jest.fn(), pause: jest.fn(), destroy: jest.fn(),
+      loadCornellBox: jest.fn(), loadRayScene: jest.fn(),
+      resume: jest.fn(), pause: jest.fn(), destroy: jest.fn(),
     };
     const modes = [];
     const coordinator = createRayTracingCoordinator({
@@ -76,10 +78,95 @@ describe('ray tracing coordinator', () => {
 
     await coordinator.setRenderMode('raytrace-cpu');
     expect(raster.setRenderMode).toHaveBeenCalledWith('raster');
+    expect(cpu.loadRayScene).toHaveBeenCalledWith(cornellScene);
     expect(raster.scene.pause).toHaveBeenCalled();
     expect(cpu.resume).toHaveBeenCalled();
     await coordinator.setRenderMode('raster');
     expect(raster.scene.resume).toHaveBeenCalled();
     expect(modes).toEqual(['raytrace-gpu', 'raytrace-cpu', 'raster']);
+  });
+
+  test('shares one retained glTF RayScene and camera pose across CPU and GPU modes', async () => {
+    const preparedRayScene = { geometries: [{}], instances: [{}] };
+    const rasterPose = { target: [1, 2, 3], rotationX: 0.1, rotationY: 0.2, zoom: 5 };
+    const cpuPose = { target: [3, 2, 1], rotationX: 0.3, rotationY: 0.4, zoom: 7 };
+    const raster = {
+      camera: { getState: jest.fn(() => rasterPose), setState: jest.fn() },
+      scene: { pause: jest.fn(), resume: jest.fn() },
+      getCapabilities: jest.fn(() => ({
+        'raytrace-gpu': { available: true },
+        'hybrid-shadows': { available: true },
+      })),
+      loadRayScene: jest.fn(() => ({ kind: 'raytrace' })),
+      setRenderMode: jest.fn(async () => {}),
+    };
+    const cpu = {
+      camera: { getState: jest.fn(() => cpuPose), setState: jest.fn() },
+      loadRayScene: jest.fn(), resume: jest.fn(), pause: jest.fn(), destroy: jest.fn(),
+    };
+    const coordinator = createRayTracingCoordinator({
+      cpuCanvas: canvas(), cpuFactory: async () => cpu,
+    });
+    coordinator.setRasterEngine(raster);
+    await coordinator.setSceneAsset({
+      preparedRayScene,
+      geometryRevision: 4,
+      instanceRevision: 9,
+    });
+
+    await coordinator.setRenderMode('raytrace-cpu');
+    expect(cpu.loadRayScene).toHaveBeenCalledWith(preparedRayScene);
+    expect(cpu.camera.setState).toHaveBeenCalledWith(rasterPose);
+
+    await coordinator.setRenderMode('raytrace-gpu');
+    expect(raster.loadRayScene).toHaveBeenCalledWith(preparedRayScene, {
+      revisions: {
+        geometryRevision: 4,
+        instanceRevision: 9,
+        materialRevision: 0,
+        lightRevision: 0,
+        cameraRevision: 0,
+        settingsRevision: 0,
+      },
+    });
+    expect(raster.camera.setState).toHaveBeenLastCalledWith(cpuPose);
+    expect(raster.setRenderMode).toHaveBeenLastCalledWith('raytrace-gpu');
+    expect(coordinator.getSceneAsset().preparedRayScene).toBe(preparedRayScene);
+  });
+
+  test('routes hybrid controls and returns to raster when the retained asset is cleared', async () => {
+    const retainedImage = { close: jest.fn() };
+    const raster = {
+      scene: { pause: jest.fn(), resume: jest.fn() },
+      getCapabilities: jest.fn(() => ({ 'hybrid-shadows': { available: true } })),
+      setRenderMode: jest.fn(async () => {}),
+      setLight: jest.fn(),
+    };
+    const modes = [];
+    const coordinator = createRayTracingCoordinator({
+      cpuCanvas: canvas(),
+      cpuFactory: async () => ({ destroy: jest.fn() }),
+      onModeChange: (value) => modes.push(value),
+    });
+    coordinator.setRasterEngine(raster);
+    await coordinator.setSceneAsset({
+      rayTracing: {
+        preparedRayScene: { geometries: [], instances: [] },
+        asset: { images: [retainedImage] },
+      },
+    });
+    await coordinator.setRenderMode('hybrid-shadows');
+    coordinator.setLight({ type: 'directional', direction: [0, -1, 0] });
+    coordinator.pause();
+    coordinator.resume();
+    expect(raster.setLight).toHaveBeenCalledWith({ type: 'directional', direction: [0, -1, 0] });
+    expect(raster.scene.pause).toHaveBeenCalled();
+    expect(raster.scene.resume).toHaveBeenCalled();
+
+    await coordinator.setSceneAsset(null);
+    expect(raster.setRenderMode).toHaveBeenLastCalledWith('raster');
+    expect(coordinator.getRenderMode()).toBe('raster');
+    expect(modes).toEqual(['hybrid-shadows', 'raster']);
+    expect(retainedImage.close).toHaveBeenCalledTimes(1);
   });
 });
