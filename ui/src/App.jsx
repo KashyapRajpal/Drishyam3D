@@ -20,6 +20,9 @@ import tileRenderWgsl from '@assets/shaders/splat-tile-render.wgsl?raw'
 import splatCullWgsl from '@assets/shaders/splat-cull.wgsl?raw'
 import splatRadixWgsl from '@assets/shaders/splat-radix-sort.wgsl?raw'
 import raytraceWgsl from '@assets/shaders/raytrace.wgsl?raw'
+import hybridGbufferWgsl from '@assets/shaders/hybrid-gbuffer.wgsl?raw'
+import hybridCompositeWgsl from '@assets/shaders/hybrid-composite.wgsl?raw'
+import hybridShadowWgsl from '@assets/shaders/hybrid-shadow.wgsl?raw'
 import defaultScript from '@scripts/scene-script.js?raw'
 import logoJpg from '@assets/logo/drishyam3d_logo.jpg'
 import { setupSettings } from '@engine/settings.js'
@@ -243,6 +246,9 @@ export default function App(){
             splatCullWgsl,
             splatRadixWgsl,
             raytraceWgsl,
+            hybridGbufferWgsl,
+            hybridCompositeWgsl,
+            hybridShadowWgsl,
           }
         : { vertex: fileContents[defaultVertPath], fragment: fileContents[defaultFragPath] }
 
@@ -384,7 +390,11 @@ export default function App(){
     if (!engine || !geometryFactory) return
     let cancelled = false
     loadShape({ engine, geometryFactory, shape: currentShape, textured })
-      .then(() => { if (!cancelled) setError(null) })
+      .then(async () => {
+        if (cancelled) return
+        await rayCoordinatorRef.current?.setSceneAsset(null)
+        setError(null)
+      })
       .catch((e) => { if (!cancelled) setError(e?.message || String(e)) })
     return () => { cancelled = true }
   }, [engineReady, currentShape, textured, hasModelLoaded])
@@ -396,7 +406,8 @@ export default function App(){
     if (!engine) return
     try {
       await rayCoordinatorRef.current?.setRenderMode('raster')
-      await loadSampleGltf({ engine })
+      const drawable = await loadSampleGltf({ engine })
+      await rayCoordinatorRef.current?.setSceneAsset(drawable)
       setHasModelLoaded(true)
       setError(null)
     } catch (err) {
@@ -418,9 +429,10 @@ export default function App(){
     try {
       await rayCoordinatorRef.current?.setRenderMode('raster')
       let kind
+      let drawable
       if (window.showDirectoryPicker) {
         const dirHandle = await window.showDirectoryPicker()
-        ;({ kind } = await loadAssetFromDirectory({ engine, dirHandle, flipY: flipSplatY }))
+        ;({ kind, drawable } = await loadAssetFromDirectory({ engine, dirHandle, flipY: flipSplatY }))
       } else {
         // Fallback (no directory API): multi-select the model + its companions.
         const isWebGPU = backend === 'webgpu'
@@ -432,8 +444,9 @@ export default function App(){
           input.click()
         })
         if (!files?.length) return
-        ;({ kind } = await loadAssetFiles({ engine, files, flipY: flipSplatY }))
+        ;({ kind, drawable } = await loadAssetFiles({ engine, files, flipY: flipSplatY }))
       }
+      await rayCoordinatorRef.current?.setSceneAsset(drawable?.rayTracing ? drawable : null)
       setSplatLoaded(kind === 'splat')
       setHasModelLoaded(true)
       setError(null)
@@ -453,6 +466,7 @@ export default function App(){
     try {
       await rayCoordinatorRef.current?.setRenderMode('raster')
       await resetSceneOp({ engine, geometryFactory })
+      await rayCoordinatorRef.current?.setSceneAsset(null)
       setHasModelLoaded(false)
       setCurrentShape('cube')
       setTextured(false)
