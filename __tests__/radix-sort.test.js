@@ -189,7 +189,10 @@ describe('radixSortIndices — full sort', () => {
     checkSort(keys, count, 16);
   });
 
-  test('all-equal keys preserve input order (stability)', () => {
+  // Stability is a property of THIS reference, not a GPU contract: the shader
+  // ranks with atomicAdd and may permute bit-identical keys. See the tie-order
+  // note in radix-reference.js.
+  test('all-equal keys preserve input order (stability of the reference)', () => {
     const count = 100;
     const keys = new Float32Array(count).fill(-42.5);
     const { indices } = radixSortIndices(keys, count, { blockSize: 16 });

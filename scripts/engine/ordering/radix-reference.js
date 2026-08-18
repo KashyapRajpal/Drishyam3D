@@ -3,12 +3,26 @@
  * @copyright 2026 Kashyap Rajpal
  * @license MIT
  *
- * Plain-JS implementation of the exact algorithm `splat-radix-sort.wgsl` will
- * run: encode f32 depth keys to order-preserving u32, then 4 × 8-bit LSD passes
- * of histogram → digit-major exclusive scan → stable scatter. Unit-tested in
- * __tests__/radix-sort.test.js, so a GPU disagreement localises to the shader
- * rather than to the design — the same JS-first pattern as
- * spatial/frustum.js ↔ splat-cull.wgsl.
+ * Plain-JS model of `splat-radix-sort.wgsl`: encode f32 depth keys to
+ * order-preserving u32, then 4 × 8-bit LSD passes of histogram → digit-major
+ * exclusive scan → scatter. Unit-tested in __tests__/radix-sort.test.js, so a GPU
+ * disagreement localises to the shader rather than to the design — the same
+ * JS-first pattern as spatial/frustum.js ↔ splat-cull.wgsl.
+ *
+ * **Where the reference and the GPU deliberately differ: tie order.** This
+ * reference is *stable* — it ranks within a block by a running counter, so equal
+ * keys keep their input order. The GPU scatter ranks with `atomicAdd`, which
+ * hands out slots in nondeterministic order, so splats whose 32-bit keys are
+ * bit-identical may come out permuted relative to this reference (and relative to
+ * each other frame to frame).
+ *
+ * That is intended, not an oversight: contended atomics are far cheaper than a
+ * stable in-block rank, and tie order is invisible in the rendered image except
+ * where two splats have exactly equal depth. So the two agree on:
+ *   - the set of indices (always a permutation of the input), and
+ *   - the relative order of every pair of *distinct* keys.
+ * They may disagree only on the internal order of a tie group. Tests here assert
+ * stability as a property of *this reference*, not as a GPU contract.
  *
  * Not imported by the renderer at runtime; the GPU does the real work. Kept here
  * next to the backend it specifies (see docs/splat-radix-sort.md).
@@ -136,12 +150,13 @@ export function exclusiveScan(arr) {
 }
 
 /**
- * Stable scatter for one pass: each element lands at its (digit, block) base plus
- * its rank among same-digit elements earlier *in its own block*.
+ * Scatter for one pass: each element lands at its (digit, block) base plus its
+ * rank among same-digit elements earlier *in its own block*.
  *
- * The rank comes from a running per-block counter — on GPU, a workgroup-shared
- * counting scan. Deliberately not atomics: atomics would make the order
- * non-deterministic across frames and break stability on tied keys.
+ * The rank comes from a running per-block counter, which makes this reference
+ * stable. The GPU uses `atomicAdd` for the same rank, which is not stable — see
+ * the tie-order note in the file header. Both place every element in the same
+ * (digit, block) slice; only the order *within* a tie group can differ.
  *
  * @param {Uint32Array} keysIn @param {Uint32Array} idxIn
  * @param {Uint32Array} keysOut @param {Uint32Array} idxOut
@@ -170,6 +185,8 @@ export function scatter(keysIn, idxIn, keysOut, idxOut, base, pass, blockSize = 
  *
  * Ascending order = most-negative view z (farthest) first = correct
  * back-to-front draw order, matching the bitonic backend it replaces.
+ *
+ * Stable here (see the file header); the GPU equivalent is not, on tied keys.
  *
  * **Ping-pong parity is load-bearing.** RADIX_PASSES is even, so the result ends
  * back in the A buffers — which is why the GPU renderer's bind group, built once

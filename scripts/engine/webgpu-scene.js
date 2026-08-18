@@ -85,8 +85,12 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
     }
 
     function render(now) {
-        if (!active) return;
+        // Cleared before the active check: this callback has fired, so nothing is
+        // scheduled any more either way. Returning early while still holding the
+        // flag would strand it true, and a suspended loop (measureFrameCost) would
+        // then never re-arm — rendering stops permanently after a benchmark.
         rafPending = false;
+        if (!active) return;
         try {
             _renderFrame(now);
         } catch (e) {
