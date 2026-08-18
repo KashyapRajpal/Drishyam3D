@@ -1441,10 +1441,10 @@ Implementation status:
 | RT-006 | Complete | `dd9b25e`; RNG/integrator focused tests, deterministic lighting and shadow cases |
 | RT-007 | Complete | `b3fe56a`, `694c092`; worker/controller tests including stale generations and instance updates |
 | RT-008 | Complete | `e6ba12e`; exact byte-layout/rebase and transform-only repack tests |
-| RT-009 | Not started | — |
-| RT-010 | Not started | — |
-| RT-010A | Not started | — |
-| RT-010B | Not started | — |
+| RT-009 | Complete | `db4b4d9`; parser/upload split tests for equivalent WebGL/WebGPU drawables and a valid retained RayScene |
+| RT-010 | Complete | `f6b7acf`; selected-scene traversal tests with two instanced primitives/materials, matrix/TRS composition, and shared local geometry |
+| RT-010A | Complete | `dea4d8f`, `94619e0`, `106a520`; accessor/GLB/parser tests for stride, normalization, generated data, multiple buffers, uint32, malformed inputs, and deferred-feature errors |
+| RT-010B | Complete | `ce63620`; multi-draw mesh-renderer tests for distinct uniforms/bind groups, shared geometry upload, legacy adaptation, and idempotent cleanup |
 | RT-011 | Complete | `14e2913`, `974c710`; mocked limits, buffers, layouts, ping-pong, readback usage, and cleanup tests |
 | RT-012 | Complete | `8c9255d`; lifecycle/two-pass tests and Chrome WGSL/pipeline validation |
 | RT-013 | In progress | `2d62736`; multi-bounce/SPF/revision/readback tests and Chrome validation complete; automated CPU/GPU numeric tolerance gate remains |
