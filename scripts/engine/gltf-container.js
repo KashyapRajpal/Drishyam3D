@@ -62,8 +62,8 @@ export function parseGlb(arrayBuffer) {
     return { json, binaryChunk };
 }
 
-export function parseGltfContainer(arrayBuffer) {
-    if (isGlb(arrayBuffer)) return parseGlb(arrayBuffer);
+export function parseGltfContainer(arrayBuffer, { expectGlb = false } = {}) {
+    if (expectGlb || isGlb(arrayBuffer)) return parseGlb(arrayBuffer);
     try {
         return {
             json: JSON.parse(new TextDecoder('utf-8').decode(arrayBuffer)),

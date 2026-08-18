@@ -1,4 +1,5 @@
 import { assetToRasterPrimitives, assetToRayScene, parseGltfAsset, parseGltfForBackend } from '../scripts/engine/gltf-parser.js';
+import { GLB_BIN_CHUNK, GLB_JSON_CHUNK, GLB_MAGIC } from '../scripts/engine/gltf-container.js';
 import { transformPoint } from '../scripts/engine/matrix.js';
 import { validateRayScene } from '../scripts/engine/raytracing/core/ray-scene.js';
 
@@ -110,6 +111,129 @@ function instancedSceneFiles({ selectUnsupportedScene = false, cycle = false } =
   ]);
 }
 
+function filesFromDocument(gltf, buffers, mainName = 'model.gltf') {
+  const entries = [[mainName, file(new TextEncoder().encode(JSON.stringify(gltf)))]];
+  gltf.buffers.forEach((buffer, index) => entries.push([buffer.uri, file(buffers[index])]));
+  return new Map(entries);
+}
+
+function robustAccessorFiles() {
+  const positions = new ArrayBuffer(48);
+  const positionView = new DataView(positions);
+  [0, 0, 0, 99, 1, 0, 0, 99, 0, 1, 0, 99]
+    .forEach((value, index) => positionView.setFloat32(index * 4, value, true));
+  const attributes = new ArrayBuffer(36);
+  new Int8Array(attributes, 0, 12).set([0, 0, 127, 0, 0, 0, 127, 0, 0, 0, 127, 0]);
+  new Uint16Array(attributes, 12, 6).set([0, 0, 65535, 0, 0, 65535]);
+  new Uint32Array(attributes, 24, 3).set([0, 1, 2]);
+  const gltf = {
+    asset: { version: '2.0' },
+    buffers: [
+      { uri: 'positions.bin', byteLength: positions.byteLength },
+      { uri: 'attributes.bin', byteLength: attributes.byteLength },
+    ],
+    bufferViews: [
+      { buffer: 0, byteOffset: 0, byteLength: 48, byteStride: 16 },
+      { buffer: 1, byteOffset: 0, byteLength: 12, byteStride: 4 },
+      { buffer: 1, byteOffset: 12, byteLength: 12 },
+      { buffer: 1, byteOffset: 24, byteLength: 12 },
+    ],
+    accessors: [
+      { bufferView: 0, componentType: 5126, count: 3, type: 'VEC3' },
+      { bufferView: 1, componentType: 5120, normalized: true, count: 3, type: 'VEC3' },
+      { bufferView: 2, componentType: 5123, normalized: true, count: 3, type: 'VEC2' },
+      { bufferView: 3, componentType: 5125, count: 3, type: 'SCALAR' },
+    ],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 }, indices: 3 }] }],
+  };
+  return filesFromDocument(gltf, [positions, attributes]);
+}
+
+function missingGeometryDataFiles() {
+  const binary = new ArrayBuffer(36);
+  new Float32Array(binary).set([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+  const gltf = {
+    asset: { version: '2.0' },
+    buffers: [{ uri: 'positions.bin', byteLength: binary.byteLength }],
+    bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: binary.byteLength }],
+    accessors: [{ bufferView: 0, componentType: 5126, count: 3, type: 'VEC3' }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }],
+  };
+  return filesFromDocument(gltf, [binary]);
+}
+
+function makeTriangleGlb() {
+  const binary = new ArrayBuffer(84);
+  new Float32Array(binary, 0, 9).set([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+  new Float32Array(binary, 36, 9).set([0, 0, 1, 0, 0, 1, 0, 0, 1]);
+  new Uint32Array(binary, 72, 3).set([0, 1, 2]);
+  const gltf = {
+    asset: { version: '2.0' },
+    buffers: [{ byteLength: 84 }],
+    bufferViews: [
+      { buffer: 0, byteOffset: 0, byteLength: 36 },
+      { buffer: 0, byteOffset: 36, byteLength: 36 },
+      { buffer: 0, byteOffset: 72, byteLength: 12 },
+    ],
+    accessors: [
+      { bufferView: 0, componentType: 5126, count: 3, type: 'VEC3' },
+      { bufferView: 1, componentType: 5126, count: 3, type: 'VEC3' },
+      { bufferView: 2, componentType: 5125, count: 3, type: 'SCALAR' },
+    ],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0, NORMAL: 1 }, indices: 2 }] }],
+  };
+  const jsonBytes = new TextEncoder().encode(JSON.stringify(gltf));
+  const jsonLength = Math.ceil(jsonBytes.length / 4) * 4;
+  const totalLength = 12 + 8 + jsonLength + 8 + binary.byteLength;
+  const glb = new ArrayBuffer(totalLength);
+  const view = new DataView(glb);
+  view.setUint32(0, GLB_MAGIC, true);
+  view.setUint32(4, 2, true);
+  view.setUint32(8, totalLength, true);
+  view.setUint32(12, jsonLength, true);
+  view.setUint32(16, GLB_JSON_CHUNK, true);
+  new Uint8Array(glb, 20, jsonLength).fill(0x20);
+  new Uint8Array(glb, 20, jsonBytes.length).set(jsonBytes);
+  const binaryHeader = 20 + jsonLength;
+  view.setUint32(binaryHeader, binary.byteLength, true);
+  view.setUint32(binaryHeader + 4, GLB_BIN_CHUNK, true);
+  new Uint8Array(glb, binaryHeader + 8).set(new Uint8Array(binary));
+  return glb;
+}
+
+function deferredFeatureFiles(feature) {
+  const binary = new ArrayBuffer(80);
+  new Float32Array(binary, 0, 9).set([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+  new Float32Array(binary, 36, 9).set([0, 0, 1, 0, 0, 1, 0, 0, 1]);
+  new Uint16Array(binary, 72, 3).set([0, 1, 2]);
+  const primitive = { attributes: { POSITION: 0, NORMAL: 1 }, indices: 2, material: 0 };
+  const gltf = {
+    asset: { version: '2.0' },
+    buffers: [{ uri: 'mesh.bin', byteLength: 80 }],
+    bufferViews: [
+      { buffer: 0, byteOffset: 0, byteLength: 36 },
+      { buffer: 0, byteOffset: 36, byteLength: 36 },
+      { buffer: 0, byteOffset: 72, byteLength: 6 },
+    ],
+    accessors: [
+      { bufferView: 0, componentType: 5126, count: 3, type: 'VEC3' },
+      { bufferView: 1, componentType: 5126, count: 3, type: 'VEC3' },
+      { bufferView: 2, componentType: 5123, count: 3, type: 'SCALAR' },
+    ],
+    materials: [{}],
+    meshes: [{ primitives: [primitive] }],
+  };
+  if (feature === 'sparse') gltf.accessors[0].sparse = { count: 1 };
+  if (feature === 'draco') gltf.extensionsUsed = ['KHR_draco_mesh_compression'];
+  if (feature === 'meshopt') gltf.bufferViews[0].extensions = { EXT_meshopt_compression: {} };
+  if (feature === 'skin') {
+    gltf.scenes = [{ nodes: [0] }]; gltf.nodes = [{ mesh: 0, skin: 0 }]; gltf.skins = [{}];
+  }
+  if (feature === 'morph') primitive.targets = [{ POSITION: 0 }];
+  if (feature === 'alpha') gltf.materials[0].alphaMode = 'BLEND';
+  return filesFromDocument(gltf, [binary]);
+}
+
 function webgl() {
   return {
     ARRAY_BUFFER: 0x8892,
@@ -192,6 +316,56 @@ describe('glTF parser/data split', () => {
       .rejects.toThrow(/Cycle detected.*node 0/);
   });
 
+  test('decodes strided and normalized attributes across multiple buffers with uint32 indices', async () => {
+    const asset = await parseGltfAsset(robustAccessorFiles());
+    expect([...asset.positions]).toEqual([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    expect([...asset.normals]).toEqual([0, 0, 1, 0, 0, 1, 0, 0, 1]);
+    expect([...asset.texCoords]).toEqual([0, 0, 1, 0, 0, 1]);
+    expect(asset.indices).toBeInstanceOf(Uint32Array);
+    expect([...asset.indices]).toEqual([0, 1, 2]);
+    expect(validateRayScene(asset.rayScene).ok).toBe(true);
+
+    const drawable = await parseGltfForBackend({ device: webgpu() }, robustAccessorFiles());
+    expect(drawable.indexFormat).toBe('uint32');
+  });
+
+  test('generates sequential indices and smooth normals when omitted', async () => {
+    const files = missingGeometryDataFiles();
+    const asset = await parseGltfAsset(files);
+    expect(asset.indices).toEqual(new Uint16Array([0, 1, 2]));
+    expect(asset.normals).toEqual(new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]));
+    expect(validateRayScene(asset.rayScene).ok).toBe(true);
+  });
+
+  test('parses a GLB v2 scene with an embedded BIN chunk', async () => {
+    const asset = await parseGltfAsset(makeTriangleGlb());
+    expect(asset.indices).toBeInstanceOf(Uint32Array);
+    expect([...asset.positions]).toEqual([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    expect(validateRayScene(asset.rayScene).ok).toBe(true);
+  });
+
+  test('surfaces malformed GLB validation errors through the asset parser', async () => {
+    const glb = makeTriangleGlb();
+    new DataView(glb).setUint32(8, glb.byteLength - 4, true);
+    await expect(parseGltfAsset(glb)).rejects.toThrow(/Malformed GLB.*declared length/);
+
+    const badMagic = makeTriangleGlb();
+    new DataView(badMagic).setUint32(0, 0, true);
+    await expect(parseGltfAsset(new Map([['broken.glb', file(badMagic)]])))
+      .rejects.toThrow(/Malformed GLB.*invalid magic/);
+  });
+
+  test.each([
+    ['sparse', /sparse accessor/],
+    ['draco', /KHR_draco_mesh_compression/],
+    ['meshopt', /EXT_meshopt_compression/],
+    ['skin', /unsupported skinning/],
+    ['morph', /morph targets/],
+    ['alpha', /unsupported alpha mode BLEND/],
+  ])('rejects unsupported %s data with a feature-specific error', async (feature, expected) => {
+    await expect(parseGltfAsset(deferredFeatureFiles(feature))).rejects.toThrow(expected);
+  });
+
   test('uploads the same retained asset contract to WebGL', async () => {
     const gl = webgl();
     const drawable = await parseGltfForBackend({ gl }, singleTriangleFiles());
@@ -207,6 +381,7 @@ describe('glTF parser/data split', () => {
     const drawable = await parseGltfForBackend({ device }, singleTriangleFiles());
     expect(drawable).toMatchObject({ kind: 'mesh', vertexCount: 3, indexFormat: 'uint16' });
     expect(device.createBuffer).toHaveBeenCalledTimes(4);
+    expect(device.createBuffer.mock.calls[3][0].size).toBe(8); // WebGPU buffer sizes are 4-byte aligned.
     expect(device.queue.writeBuffer).toHaveBeenCalledTimes(4);
     expect(validateRayScene(drawable.rayTracing.preparedRayScene).ok).toBe(true);
   });

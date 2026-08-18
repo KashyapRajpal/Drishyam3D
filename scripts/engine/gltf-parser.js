@@ -5,14 +5,16 @@
  */
 
 import { composeTRSMatrix, createIdentityMatrix, multiplyMatrices } from './matrix.js';
+import { createSequentialIndices, decodeGltfAccessor } from './gltf-accessors.js';
+import { parseGltfContainer } from './gltf-container.js';
+import { generateVertexNormals } from './gltf-geometry.js';
 import { prepareRayScene } from './raytracing/core/ray-scene.js';
 import { uploadGltfWebGL, uploadGltfWebGPU } from './gltf-upload.js';
 
 export { getWebGLComponentType } from './gltf-upload.js';
 
-// This is a simplified GLTF loader designed to handle basic GLTF 2.0 files,
-// particularly those with a single external .bin file and external textures,
-// like the Khronos BoxTextured sample. It does not implement the full GLTF spec.
+// This loader intentionally targets static glTF 2.0 triangle scenes. Unsupported
+// animation/deformation/compression features fail by name instead of being ignored.
 
 
 /**
@@ -23,26 +25,11 @@ export { getWebGLComponentType } from './gltf-upload.js';
  * @returns {TypedArray} The extracted typed array.
  */
 export function getBufferViewData(bufferData, bufferView, accessor) {
-    const byteOffset = (bufferView.byteOffset || 0) + (accessor.byteOffset || 0);
-    
-    let elementCount;
-    switch (accessor.type) {
-        case 'VEC3': elementCount = accessor.count * 3; break;
-        case 'VEC2': elementCount = accessor.count * 2; break;
-        case 'SCALAR': elementCount = accessor.count; break;
-        default: throw new Error(`Unsupported accessor type: ${accessor.type}`);
-    }
-    
-    switch (accessor.componentType) {
-        // The third argument to the TypedArray constructor is the number of ELEMENTS, not bytes.
-        case 5120: return new Int8Array(bufferData, byteOffset, elementCount);
-        case 5121: return new Uint8Array(bufferData, byteOffset, elementCount);
-        case 5122: return new Int16Array(bufferData, byteOffset, elementCount);
-        case 5123: return new Uint16Array(bufferData, byteOffset, elementCount);
-        case 5125: return new Uint32Array(bufferData, byteOffset, elementCount);
-        case 5126: return new Float32Array(bufferData, byteOffset, elementCount);
-        default: throw new Error(`Unsupported accessor component type: ${accessor.componentType}`);
-    }
+    return decodeGltfAccessor(
+        { bufferViews: [{ ...bufferView, buffer: 0 }], accessors: [{ ...accessor, bufferView: 0 }] },
+        [bufferData],
+        0,
+    ).data;
 }
 
 function defaultMaterial() {
@@ -198,6 +185,42 @@ function resolveLocalFile(localFileMap, fullPath) {
     return null;
 }
 
+async function loadGltfBuffers(gltf, binaryChunk, baseUrl, localFileMap, listAvailableFiles) {
+    if (!gltf.buffers?.length) throw new Error('GLTF file does not contain a buffer.');
+    let claimedBinaryChunk = false;
+    return Promise.all(gltf.buffers.map(async (buffer, bufferIndex) => {
+        if (!Number.isInteger(buffer.byteLength) || buffer.byteLength < 0) {
+            throw new Error(`Buffer ${bufferIndex} byteLength must be a non-negative integer.`);
+        }
+        let data;
+        if (buffer.uri != null) {
+            if (typeof buffer.uri !== 'string' || buffer.uri.startsWith('data:')) {
+                throw new Error(`Buffer ${bufferIndex} uses an embedded data URI, which is not supported.`);
+            }
+            const bufferPath = baseUrl + buffer.uri;
+            const localFile = resolveLocalFile(localFileMap, bufferPath);
+            if (localFile) {
+                data = await localFile.arrayBuffer();
+            } else if (baseUrl) {
+                const response = await fetch(bufferPath);
+                if (!response.ok) throw new Error(`Failed to fetch binary buffer from ${bufferPath}`);
+                data = await response.arrayBuffer();
+            } else {
+                throw new Error(`Cannot resolve buffer URI: ${buffer.uri}. baseUrl=(empty); available files (sample): ${listAvailableFiles().join(', ')}`);
+            }
+        } else {
+            if (!binaryChunk) throw new Error(`Buffer ${bufferIndex} has no URI and no GLB BIN chunk.`);
+            if (claimedBinaryChunk) throw new Error('Only one glTF buffer may reference the GLB BIN chunk.');
+            claimedBinaryChunk = true;
+            data = binaryChunk;
+        }
+        if (!(data instanceof ArrayBuffer) || data.byteLength < buffer.byteLength) {
+            throw new Error(`Buffer ${bufferIndex} has ${data?.byteLength ?? 'invalid'} bytes; expected at least ${buffer.byteLength}.`);
+        }
+        return data;
+    }));
+}
+
 function retainMaterial(gltfJson, material = {}) {
     const pbr = material.pbrMetallicRoughness || {};
     const textureIndex = pbr.baseColorTexture?.index;
@@ -229,18 +252,6 @@ function nodeLocalMatrix(node, nodeIndex) {
     }
 }
 
-function requireTightAccessor(gltfJson, accessorIndex, label) {
-    const accessor = gltfJson.accessors?.[accessorIndex];
-    if (!accessor) throw new Error(`${label} references missing accessor ${accessorIndex}.`);
-    if (accessor.sparse) throw new Error(`${label} uses a sparse accessor; sparse accessors are deferred to RT-010A.`);
-    if (accessor.normalized) throw new Error(`${label} uses normalized integer data; normalized accessors are deferred to RT-010A.`);
-    const bufferView = gltfJson.bufferViews?.[accessor.bufferView];
-    if (!bufferView) throw new Error(`${label} references missing bufferView ${accessor.bufferView}.`);
-    if (bufferView.buffer !== 0) throw new Error(`${label} uses buffer ${bufferView.buffer}; multiple buffers are deferred to RT-010A.`);
-    if (bufferView.byteStride != null) throw new Error(`${label} uses byteStride; strided accessors are deferred to RT-010A.`);
-    return { accessor, bufferView };
-}
-
 /**
  * Parses GLTF into backend-agnostic typed arrays and optional texture bitmap.
  * @param {ArrayBuffer | string | FileList | Map<string, File>} source
@@ -248,6 +259,7 @@ function requireTightAccessor(gltfJson, accessorIndex, label) {
  */
 export async function parseGltfAsset(source) {
     let gltfJson;
+    let binaryChunk = null;
     let baseUrl = '';
     const localFileMap = new Map();
     let sourceName = 'gltf';
@@ -258,20 +270,27 @@ export async function parseGltfAsset(source) {
     }
 
     if (typeof source === 'string') {
-        // Assume source is a URL to a .gltf file
         const response = await fetch(source);
         if (!response.ok) throw new Error(`Failed to fetch GLTF from ${source}: ${response.statusText}`);
-        gltfJson = await response.json();
+        ({ json: gltfJson, binaryChunk } = parseGltfContainer(
+            await response.arrayBuffer(),
+            { expectGlb: /\.glb(?:$|[?#])/i.test(source) },
+        ));
         baseUrl = source.substring(0, source.lastIndexOf('/') + 1);
         const urlParts = source.split('/');
         const fileName = urlParts[urlParts.length - 1] || '';
         sourceName = fileName.replace(/\.[^/.]+$/, '') || 'gltf';
     } else if ((typeof FileList !== 'undefined' && source instanceof FileList) || source instanceof Map) {
-        // Find the main .gltf or .glb file
-        let mainFilePath = Array.from(source.keys()).find(path => path.endsWith('.gltf') || path.endsWith('.glb'));
+        if (source instanceof Map) {
+            source.forEach((value, key) => localFileMap.set(key, value));
+        } else {
+            for (const selectedFile of source) {
+                localFileMap.set(selectedFile.webkitRelativePath || selectedFile.name, selectedFile);
+            }
+        }
+        const mainFilePath = [...localFileMap.keys()].find((path) => /\.(gltf|glb)$/i.test(path));
         if (!mainFilePath) throw new Error("No .gltf or .glb file found in selection.");
-
-        const mainFile = source.get(mainFilePath);
+        const mainFile = localFileMap.get(mainFilePath);
 
         // Determine the base path from the main GLTF file's location
         const lastSlash = mainFilePath.lastIndexOf('/');
@@ -279,49 +298,36 @@ export async function parseGltfAsset(source) {
             baseUrl = mainFilePath.substring(0, lastSlash + 1);
         }
 
-        const fileBuffer = await mainFile.arrayBuffer();
-        gltfJson = JSON.parse(new TextDecoder('utf-8').decode(fileBuffer));
+        ({ json: gltfJson, binaryChunk } = parseGltfContainer(
+            await mainFile.arrayBuffer(),
+            { expectGlb: /\.glb$/i.test(mainFilePath) },
+        ));
 
         const mainFileName = mainFilePath.split('/').pop() || mainFilePath;
         sourceName = mainFileName.replace(/\.[^/.]+$/, '') || 'gltf';
 
-        // The source is already a map of paths to files, so we can use it directly.
-        source.forEach((value, key) => localFileMap.set(key, value));
-
     } else if (source instanceof ArrayBuffer) {
-        const decoder = new TextDecoder('utf-8');
-        gltfJson = JSON.parse(decoder.decode(source));
+        ({ json: gltfJson, binaryChunk } = parseGltfContainer(source));
     } else {
-        throw new Error("Unsupported GLTF source type. Must be URL string or ArrayBuffer.");
+        throw new Error("Unsupported GLTF source type. Must be a URL, ArrayBuffer, FileList, or file Map.");
     }
 
+    if (gltfJson?.asset?.version !== '2.0') throw new Error(`Unsupported glTF version ${gltfJson?.asset?.version || '(missing)'}; expected 2.0.`);
+    const extensions = new Set(gltfJson.extensionsUsed || []);
+    if (extensions.has('KHR_draco_mesh_compression')) {
+        throw new Error('KHR_draco_mesh_compression is not supported; provide uncompressed mesh data.');
+    }
+    if (extensions.has('EXT_meshopt_compression')) {
+        throw new Error('EXT_meshopt_compression is not supported; provide uncompressed mesh data.');
+    }
+    if (gltfJson.bufferViews?.some((view) => view.extensions?.EXT_meshopt_compression)) {
+        throw new Error('EXT_meshopt_compression is not supported; provide uncompressed mesh data.');
+    }
     if (!gltfJson || !gltfJson.meshes || gltfJson.meshes.length === 0) {
         throw new Error("GLTF file does not contain any meshes.");
     }
 
-    // --- Buffers ---
-    if (!gltfJson.buffers?.length) throw new Error('GLTF file does not contain a buffer.');
-    if (gltfJson.buffers.length !== 1) {
-        throw new Error('Multiple glTF buffers are deferred to RT-010A.');
-    }
-    const buffer = gltfJson.buffers[0];
-    let binaryBufferData;
-
-    if (buffer.uri) {
-        const bufferPath = baseUrl + buffer.uri;
-        const localBinFile = resolveLocalFile(localFileMap, bufferPath);
-        if (localBinFile) {
-            binaryBufferData = await localBinFile.arrayBuffer();
-        } else if (baseUrl) {
-            const bufferResponse = await fetch(baseUrl + buffer.uri);
-            if (!bufferResponse.ok) throw new Error(`Failed to fetch binary buffer from ${baseUrl + buffer.uri}`);
-            binaryBufferData = await bufferResponse.arrayBuffer();
-        } else {
-            throw new Error(`Cannot resolve buffer URI: ${buffer.uri}. baseUrl=${baseUrl || '(empty)'}; available files (sample): ${listAvailableFiles().join(', ')}`);
-        }
-    } else {
-        throw new Error("Embedded GLTF buffers are not yet supported by this simple loader.");
-    }
+    const bufferData = await loadGltfBuffers(gltfJson, binaryChunk, baseUrl, localFileMap, listAvailableFiles);
 
     const retainedMaterials = (gltfJson.materials || []).map((material) => retainMaterial(gltfJson, material));
     let defaultMaterialIndex = -1;
@@ -342,7 +348,7 @@ export async function parseGltfAsset(source) {
             throw new Error(`${label} references missing base-color texture ${textureIndex}.`);
         }
         if (retainedMaterials[primitive.material].alphaMode !== 'OPAQUE') {
-            throw new Error(`${label} uses alpha mode ${retainedMaterials[primitive.material].alphaMode}; alpha materials are deferred to RT-010A.`);
+            throw new Error(`${label} uses unsupported alpha mode ${retainedMaterials[primitive.material].alphaMode}.`);
         }
         return primitive.material;
     };
@@ -358,42 +364,76 @@ export async function parseGltfAsset(source) {
             const label = `Mesh ${meshIndex} primitive ${primitiveIndex}`;
             const mode = primitive.mode ?? 4;
             if (mode !== 4) throw new Error(`${label} uses unsupported mode ${mode}; only TRIANGLES (4) is supported.`);
-            if (primitive.targets?.length) throw new Error(`${label} uses morph targets; morph targets are deferred to RT-010A.`);
+            if (primitive.extensions?.KHR_draco_mesh_compression) {
+                throw new Error(`${label} uses KHR_draco_mesh_compression, which is not supported.`);
+            }
+            if (primitive.targets?.length) throw new Error(`${label} uses morph targets, which are not supported.`);
             if (primitive.attributes?.POSITION == null) throw new Error(`${label} omits POSITION.`);
-            if (primitive.attributes?.NORMAL == null) throw new Error(`${label} omits NORMAL; normal generation is deferred to RT-010A.`);
-            if (primitive.indices == null) throw new Error(`${label} omits indices; generated indices are deferred to RT-010A.`);
 
-            const position = requireTightAccessor(gltfJson, primitive.attributes.POSITION, `${label} POSITION`);
-            const normal = requireTightAccessor(gltfJson, primitive.attributes.NORMAL, `${label} NORMAL`);
-            const index = requireTightAccessor(gltfJson, primitive.indices, `${label} indices`);
-            if (position.accessor.type !== 'VEC3' || position.accessor.componentType !== 5126) {
-                throw new Error(`${label} POSITION must be a tightly packed FLOAT VEC3 accessor.`);
+            const position = decodeGltfAccessor(
+                gltfJson,
+                bufferData,
+                primitive.attributes.POSITION,
+                `${label} POSITION`,
+            );
+            if (position.type !== 'VEC3' || position.componentType !== 5126) {
+                throw new Error(`${label} POSITION must be a FLOAT VEC3 accessor.`);
             }
-            if (normal.accessor.type !== 'VEC3' || normal.accessor.componentType !== 5126) {
-                throw new Error(`${label} NORMAL must be a tightly packed FLOAT VEC3 accessor.`);
-            }
-            if (index.accessor.type !== 'SCALAR' || ![5121, 5123, 5125].includes(index.accessor.componentType)) {
-                throw new Error(`${label} indices must be an unsigned integer SCALAR accessor.`);
-            }
-            let texCoord = null;
-            if (primitive.attributes.TEXCOORD_0 != null) {
-                texCoord = requireTightAccessor(gltfJson, primitive.attributes.TEXCOORD_0, `${label} TEXCOORD_0`);
-                if (texCoord.accessor.type !== 'VEC2' || texCoord.accessor.componentType !== 5126) {
-                    throw new Error(`${label} TEXCOORD_0 must be a tightly packed FLOAT VEC2 accessor.`);
+            const positions = position.data;
+
+            let indices;
+            let indicesComponentType;
+            if (primitive.indices == null) {
+                indices = createSequentialIndices(position.count);
+                indicesComponentType = indices instanceof Uint32Array ? 5125 : 5123;
+            } else {
+                const index = decodeGltfAccessor(gltfJson, bufferData, primitive.indices, `${label} indices`);
+                if (index.type !== 'SCALAR' || ![5121, 5123, 5125].includes(index.componentType) || index.normalized) {
+                    throw new Error(`${label} indices must be an unnormalized unsigned integer SCALAR accessor.`);
                 }
-            }
-
-            const positions = getBufferViewData(binaryBufferData, position.bufferView, position.accessor);
-            const normals = getBufferViewData(binaryBufferData, normal.bufferView, normal.accessor);
-            const indices = getBufferViewData(binaryBufferData, index.bufferView, index.accessor);
-            const texCoords = texCoord
-                ? getBufferViewData(binaryBufferData, texCoord.bufferView, texCoord.accessor)
-                : null;
-            if (normals.length !== positions.length) throw new Error(`${label} NORMAL count must match POSITION count.`);
-            if (texCoords && texCoords.length !== (positions.length / 3) * 2) {
-                throw new Error(`${label} TEXCOORD_0 count must match POSITION count.`);
+                indices = index.data;
+                indicesComponentType = index.componentType;
             }
             if (indices.length % 3 !== 0) throw new Error(`${label} index count must be a multiple of three.`);
+            for (let index = 0; index < indices.length; index += 1) {
+                if (indices[index] >= position.count) throw new Error(`${label} index ${index} is out of range.`);
+            }
+
+            let normals;
+            if (primitive.attributes.NORMAL == null) {
+                normals = generateVertexNormals(positions, indices);
+            } else {
+                const normal = decodeGltfAccessor(
+                    gltfJson,
+                    bufferData,
+                    primitive.attributes.NORMAL,
+                    `${label} NORMAL`,
+                );
+                const supportedNormal = normal.componentType === 5126
+                    || (normal.normalized && [5120, 5122].includes(normal.componentType));
+                if (normal.type !== 'VEC3' || !supportedNormal || !(normal.data instanceof Float32Array)) {
+                    throw new Error(`${label} NORMAL must be FLOAT or normalized signed-integer VEC3 data.`);
+                }
+                normals = normal.data;
+                if (normal.count !== position.count) throw new Error(`${label} NORMAL count must match POSITION count.`);
+            }
+
+            let texCoords = null;
+            if (primitive.attributes.TEXCOORD_0 != null) {
+                const texCoord = decodeGltfAccessor(
+                    gltfJson,
+                    bufferData,
+                    primitive.attributes.TEXCOORD_0,
+                    `${label} TEXCOORD_0`,
+                );
+                const supportedTexCoord = texCoord.componentType === 5126
+                    || (texCoord.normalized && [5121, 5123].includes(texCoord.componentType));
+                if (texCoord.type !== 'VEC2' || !supportedTexCoord || !(texCoord.data instanceof Float32Array)) {
+                    throw new Error(`${label} TEXCOORD_0 must be FLOAT or normalized unsigned-integer VEC2 data.`);
+                }
+                if (texCoord.count !== position.count) throw new Error(`${label} TEXCOORD_0 count must match POSITION count.`);
+                texCoords = texCoord.data;
+            }
 
             return {
                 sourcePrimitiveIndex: primitiveIndex,
@@ -403,7 +443,7 @@ export async function parseGltfAsset(source) {
                 normals,
                 texCoords,
                 indices,
-                indicesComponentType: index.accessor.componentType,
+                indicesComponentType,
                 materialIndex: getMaterialIndex(primitive, label),
             };
         });
@@ -428,7 +468,7 @@ export async function parseGltfAsset(source) {
         activePath.add(nodeIndex);
         visited.add(nodeIndex);
         const sourceNode = sourceNodes[nodeIndex];
-        if (sourceNode.skin != null) throw new Error(`Node ${nodeIndex} uses a skin; skinning is deferred to RT-010A.`);
+        if (sourceNode.skin != null) throw new Error(`Node ${nodeIndex} uses unsupported skinning.`);
         const localMatrix = nodeLocalMatrix(sourceNode, nodeIndex);
         const worldMatrix = multiplyMatrices(parentWorld, localMatrix);
         const meshIndex = sourceNode.mesh ?? -1;
@@ -474,7 +514,7 @@ export async function parseGltfAsset(source) {
     await Promise.all([...usedImageIndices].map(async (imageIndex) => {
         const imageSource = gltfJson.images?.[imageIndex];
         if (!imageSource) throw new Error(`Material references missing image ${imageIndex}.`);
-        if (!imageSource.uri) throw new Error('Embedded GLTF images are deferred to RT-010A.');
+        if (!imageSource.uri) throw new Error('Embedded glTF images are not supported.');
         const imagePath = baseUrl + imageSource.uri;
         const localImageFile = resolveLocalFile(localFileMap, imagePath);
         if (localImageFile) {

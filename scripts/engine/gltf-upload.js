@@ -71,13 +71,15 @@ export function uploadGltfWebGL(gl, asset) {
 
 export function uploadGltfWebGPU(device, asset) {
     let indices = asset.indices;
-    if (!(indices instanceof Uint16Array)) {
-        let maxIndex = 0;
-        for (let i = 0; i < indices.length; i += 1) maxIndex = Math.max(maxIndex, indices[i]);
-        if (maxIndex > 65535) {
-            throw new Error('Model uses 32-bit indices not yet supported by the current WebGPU index path.');
-        }
+    if (!(indices instanceof Uint16Array) && !(indices instanceof Uint32Array)) {
         indices = new Uint16Array(indices);
+    }
+    const indexFormat = indices instanceof Uint32Array ? 'uint32' : 'uint16';
+    const indexCount = indices.length;
+    let uploadIndices = indices;
+    if (indices.byteLength % 4 !== 0) {
+        uploadIndices = new Uint16Array(indices.length + 1);
+        uploadIndices.set(indices);
     }
     const texCoords = asset.texCoords || new Float32Array((asset.positions.length / 3) * 2);
     return {
@@ -86,18 +88,18 @@ export function uploadGltfWebGPU(device, asset) {
             position: createVertexBuffer(device, asset.positions),
             normal: createVertexBuffer(device, asset.normals),
             texCoord: createVertexBuffer(device, texCoords),
-            indices: createIndexBuffer(device, indices),
+            indices: createIndexBuffer(device, uploadIndices),
         },
         texture: asset.textureBitmap ? createTextureFromImageBitmap(device, asset.textureBitmap) : null,
-        vertexCount: indices.length,
-        indexFormat: 'uint16',
+        vertexCount: indexCount,
+        indexFormat,
         bounds: asset.bounds,
         rayTracing: { asset, preparedRayScene: asset.rayScene },
         _debug: {
             name: asset.sourceName,
             positionElementCount: asset.positions.length,
             normalElementCount: asset.normals.length,
-            indexElementCount: indices.length,
+            indexElementCount: indexCount,
         },
     };
 }
