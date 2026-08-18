@@ -44,6 +44,7 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
     const hybridShadowRenderer = new HybridShadowRenderer(device, format);
     let rayShaderReady = false;
     let hybridShadersReady = false;
+    let hybridShadowReady = false;
     let activeSplatRenderer = splatRenderer; // Toggle between instanced and tile modes
     const renderers = new Map([
         ['mesh', meshRenderer],
@@ -310,6 +311,15 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
             return true;
         },
 
+        setHybridShadowShader(shadowSource) {
+            if (!shadowSource) return false;
+            hybridShadowRenderer.setShadowShader(shadowSource);
+            hybridShadowReady = true;
+            if (renderMode === 'hybrid-shadows' && rasterDrawable) hybridShadowRenderer.prepare(rasterDrawable);
+            forceUpdate();
+            return true;
+        },
+
         setHybridLight(light) {
             hybridShadowRenderer.setLight(light);
             forceUpdate();
@@ -326,6 +336,7 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
                 rayTraceRenderer.prepare(rayDrawable);
             } else if (nextMode === 'hybrid-shadows') {
                 if (!hybridShadersReady) throw unsupportedMode('Hybrid shadow shaders are unavailable.');
+                if (!hybridShadowReady) throw unsupportedMode('Hybrid any-hit shadow shader is unavailable.');
                 if (!rasterDrawable || (rasterDrawable.kind ?? 'mesh') !== 'mesh') {
                     throw unsupportedMode('Hybrid shadows require a triangle mesh drawable.');
                 }

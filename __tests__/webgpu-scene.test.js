@@ -11,6 +11,7 @@ function mockRenderer(kind) {
     setPipeline: jest.fn(),
     setShaders: jest.fn(),
     setShader: jest.fn(),
+    setShadowShader: jest.fn(),
     setReduction: jest.fn(),
     setSort: jest.fn(),
     setDebugMode: jest.fn(),
@@ -158,6 +159,7 @@ describe('WebGPU scene ray tracing registry', () => {
     const update = jest.fn();
     scene.updateUserScript({ init: jest.fn(), update });
     scene.setHybridShaders('gbuffer wgsl', 'composite wgsl');
+    scene.setHybridShadowShader('shadow wgsl');
     scene.loadGeometry({ kind: 'mesh', vertexCount: 3 });
     expect(() => scene.setRenderMode('hybrid-shadows')).toThrow(/ray-traceable mesh sidecar/);
 

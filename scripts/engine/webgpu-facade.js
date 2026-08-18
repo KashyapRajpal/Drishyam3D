@@ -414,6 +414,14 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
             errorHandler(error);
         }
     }
+    if (shaderSources.hybridShadowWgsl && !hybridError) {
+        try {
+            scene.setHybridShadowShader(shaderSources.hybridShadowWgsl);
+        } catch (error) {
+            hybridError = error;
+            errorHandler(error);
+        }
+    }
     setScriptSource(scriptSource);
     scene.start();
 
@@ -431,9 +439,14 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
                 reason: rayTracingError?.message || (!shaderSources.raytraceWgsl ? 'GPU ray tracing shader is unavailable.' : undefined),
             },
             'hybrid-shadows': {
-                available: !!shaderSources.hybridGbufferWgsl && !!shaderSources.hybridCompositeWgsl && !hybridError,
+                available: !!shaderSources.hybridGbufferWgsl
+                    && !!shaderSources.hybridCompositeWgsl
+                    && !!shaderSources.hybridShadowWgsl
+                    && !hybridError,
                 reason: hybridError?.message || (
-                    !shaderSources.hybridGbufferWgsl || !shaderSources.hybridCompositeWgsl
+                    !shaderSources.hybridGbufferWgsl
+                    || !shaderSources.hybridCompositeWgsl
+                    || !shaderSources.hybridShadowWgsl
                         ? 'Hybrid shadow shaders are unavailable.'
                         : undefined
                 ),

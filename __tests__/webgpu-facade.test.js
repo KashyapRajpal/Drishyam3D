@@ -4,6 +4,7 @@ const mockScene = {
   updateUserScript: jest.fn(),
   setRayTracingShader: jest.fn(() => true),
   setHybridShaders: jest.fn(() => true),
+  setHybridShadowShader: jest.fn(() => true),
   setHybridLight: jest.fn(),
   setRenderMode: jest.fn(),
   setRayTracingSettings: jest.fn(),
@@ -162,11 +163,13 @@ describe('WebGPU Facade', () => {
         wgsl: 'mesh shader',
         hybridGbufferWgsl: 'gbuffer shader',
         hybridCompositeWgsl: 'composite shader',
+        hybridShadowWgsl: 'shadow shader',
       },
       scriptSource: 'function init(){}\nfunction update(){}',
       onError: jest.fn(),
     });
     expect(mockScene.setHybridShaders).toHaveBeenCalledWith('gbuffer shader', 'composite shader');
+    expect(mockScene.setHybridShadowShader).toHaveBeenCalledWith('shadow shader');
     expect(result.getCapabilities()['hybrid-shadows']).toEqual({ available: true, reason: undefined });
     result.setLight({ type: 'directional', direction: [0, -1, 0] });
     expect(mockScene.setHybridLight).toHaveBeenCalledWith({ type: 'directional', direction: [0, -1, 0] });
