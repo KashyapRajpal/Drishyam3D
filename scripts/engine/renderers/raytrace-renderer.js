@@ -1,6 +1,7 @@
 import { Renderer } from './renderer.js';
 import { createCameraFrame } from '../raytracing/core/camera-rays.js';
 import {
+    DIAGNOSTICS_SIZE,
     FRAME_FLAG_HAS_TLAS,
     packFrameUniforms,
 } from '../raytracing/gpu/gpu-ray-layout.js';
@@ -8,6 +9,7 @@ import { packGpuScene } from '../raytracing/gpu/gpu-scene-packer.js';
 import {
     advanceAccumulationTargets,
     assertRayTracingDeviceSupport,
+    clearGpuRayDiagnostics,
     createGpuRayAccumulationBindGroups,
     createGpuRayBindGroupLayouts,
     createGpuRayDisplayBindGroups,
@@ -25,10 +27,22 @@ import {
 
 const WORKGROUP_SIZE = 8;
 const DISPLAY_SHADER_MARKER = '// === RAYTRACE DISPLAY SHADER ===';
+const MAX_BOUNCES = 16;
+const MAX_SAMPLES_PER_FRAME = 16;
+const REVISION_FIELDS = Object.freeze([
+    'geometryRevision',
+    'instanceRevision',
+    'materialRevision',
+    'lightRevision',
+    'cameraRevision',
+    'settingsRevision',
+]);
 const DEFAULT_SETTINGS = Object.freeze({
     exposure: 1,
     environmentIntensity: 1,
     seed: 0x12345678,
+    maxBounces: 4,
+    samplesPerFrame: 1,
 });
 
 function cameraKey(cameraFrame, width, height) {
@@ -53,6 +67,23 @@ function firstLight(scene) {
     };
 }
 
+function revisionsKey(revisions = {}) {
+    return REVISION_FIELDS.map((field) => {
+        const value = revisions[field] ?? 0;
+        if (!Number.isInteger(value) || value < 0) throw new Error(`${field} must be a non-negative integer.`);
+        return value;
+    }).join(':');
+}
+
+function float16ToNumber(value) {
+    const sign = (value & 0x8000) ? -1 : 1;
+    const exponent = (value >> 10) & 0x1f;
+    const fraction = value & 0x03ff;
+    if (exponent === 0) return sign * fraction * (2 ** -24);
+    if (exponent === 0x1f) return fraction ? NaN : sign * Infinity;
+    return sign * (1 + fraction / 1024) * (2 ** (exponent - 15));
+}
+
 /** WebGPU primary visibility, direct lighting, hard shadows, and display pass. */
 export class RayTraceRenderer extends Renderer {
     get kind() { return 'raytrace'; }
@@ -73,6 +104,8 @@ export class RayTraceRenderer extends Renderer {
         this.settings = { ...DEFAULT_SETTINGS };
         this.sampleCount = 0;
         this.lastCameraKey = null;
+        this.lastRevisionKey = null;
+        this.diagnostics = { stackOverflows: 0, nonFinite: 0, rays: 0 };
         this.initialized = false;
         this.destroyed = false;
     }
@@ -122,6 +155,14 @@ export class RayTraceRenderer extends Renderer {
         if (!Number.isInteger(next.seed) || next.seed < 0 || next.seed > 0xffffffff) {
             throw new Error('seed must fit u32.');
         }
+        if (!Number.isInteger(next.maxBounces) || next.maxBounces < 1 || next.maxBounces > MAX_BOUNCES) {
+            throw new Error(`maxBounces must be an integer in [1, ${MAX_BOUNCES}].`);
+        }
+        if (!Number.isInteger(next.samplesPerFrame)
+            || next.samplesPerFrame < 1
+            || next.samplesPerFrame > MAX_SAMPLES_PER_FRAME) {
+            throw new Error(`samplesPerFrame must be an integer in [1, ${MAX_SAMPLES_PER_FRAME}].`);
+        }
         const changed = Object.keys(next).some((key) => next[key] !== this.settings[key]);
         this.settings = next;
         if (changed) this.resetAccumulation();
@@ -159,6 +200,7 @@ export class RayTraceRenderer extends Renderer {
     resetAccumulation() {
         this.sampleCount = 0;
         this.lastCameraKey = null;
+        this.lastRevisionKey = null;
         if (this.accumulationTargets && !this.accumulationTargets.destroyed) {
             this.accumulationTargets.readIndex = 0;
         }
@@ -204,8 +246,14 @@ export class RayTraceRenderer extends Renderer {
             aspect: width / height,
         });
         const nextCameraKey = cameraKey(cameraFrame, width, height);
-        if (this.lastCameraKey !== null && this.lastCameraKey !== nextCameraKey) this.sampleCount = 0;
+        const nextRevisionKey = revisionsKey(drawable.revisions);
+        if ((this.lastCameraKey !== null && this.lastCameraKey !== nextCameraKey)
+            || (this.lastRevisionKey !== null && this.lastRevisionKey !== nextRevisionKey)) {
+            this.sampleCount = 0;
+            this.accumulationTargets.readIndex = 0;
+        }
         this.lastCameraKey = nextCameraKey;
+        this.lastRevisionKey = nextRevisionKey;
 
         const light = firstLight(scene);
         const uniforms = packFrameUniforms({
@@ -213,9 +261,9 @@ export class RayTraceRenderer extends Renderer {
             width,
             height,
             sampleIndex: this.sampleCount,
-            frameSeed: (this.settings.seed ^ this.sampleCount) >>> 0,
-            maxBounces: 1,
-            samplesPerFrame: 1,
+            frameSeed: this.settings.seed,
+            maxBounces: this.settings.maxBounces,
+            samplesPerFrame: this.settings.samplesPerFrame,
             lightType: light.type || 'rect',
             flags: this.packedScene.metadata.tlasNodeCount > 0 ? FRAME_FLAG_HAS_TLAS : 0,
             rayEpsilon: 1e-4 * Math.max(1, scene.bounds?.radius || 0),
@@ -225,6 +273,7 @@ export class RayTraceRenderer extends Renderer {
             light,
         });
         uploadGpuRayFrameUniforms(device, this.frameResources, uniforms);
+        clearGpuRayDiagnostics(device, this.frameResources);
         device.queue.writeBuffer(
             this.frameResources.displayUniformBuffer,
             0,
@@ -238,6 +287,16 @@ export class RayTraceRenderer extends Renderer {
         compute.setBindGroup(1, this.accumulationBindGroups[pair.readIndex]);
         compute.dispatchWorkgroups(Math.ceil(width / WORKGROUP_SIZE), Math.ceil(height / WORKGROUP_SIZE));
         compute.end();
+        const diagnosticsMapState = this.frameResources.diagnosticsReadbackBuffer.mapState;
+        if (encoder.copyBufferToBuffer && (diagnosticsMapState == null || diagnosticsMapState === 'unmapped')) {
+            encoder.copyBufferToBuffer(
+                this.frameResources.diagnosticsBuffer,
+                0,
+                this.frameResources.diagnosticsReadbackBuffer,
+                0,
+                DIAGNOSTICS_SIZE,
+            );
+        }
 
         const display = encoder.beginRenderPass({
             label: 'Ray tracing display pass',
@@ -254,7 +313,66 @@ export class RayTraceRenderer extends Renderer {
         display.end();
 
         advanceAccumulationTargets(this.accumulationTargets);
-        this.sampleCount += 1;
+        this.sampleCount += this.settings.samplesPerFrame;
+    }
+
+    async readDiagnostics() {
+        const buffer = this.frameResources?.diagnosticsReadbackBuffer;
+        if (!buffer?.mapAsync || buffer.mapState === 'pending' || buffer.mapState === 'mapped') {
+            return { ...this.diagnostics };
+        }
+        await buffer.mapAsync(GPUMapMode.READ);
+        const values = new Uint32Array(buffer.getMappedRange()).slice(0, DIAGNOSTICS_SIZE / 4);
+        buffer.unmap();
+        this.diagnostics = {
+            stackOverflows: values[0],
+            nonFinite: values[1],
+            rays: values[2],
+        };
+        return { ...this.diagnostics };
+    }
+
+    /** Deterministic rgba16float readback hook used by GPU/CPU parity tests. */
+    async readAccumulation() {
+        if (!this.accumulationTargets || this.sampleCount === 0) {
+            throw new Error('No ray tracing accumulation is available to read.');
+        }
+        const { width, height, textures, readIndex } = this.accumulationTargets;
+        const unpaddedBytesPerRow = width * 8;
+        const bytesPerRow = Math.ceil(unpaddedBytesPerRow / 256) * 256;
+        const readback = this.device.createBuffer({
+            label: 'Ray tracing accumulation readback',
+            size: bytesPerRow * height,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+        });
+        let mapped = false;
+        try {
+            const encoder = this.device.createCommandEncoder({ label: 'Ray tracing accumulation readback' });
+            encoder.copyTextureToBuffer(
+                { texture: textures[readIndex] },
+                { buffer: readback, bytesPerRow, rowsPerImage: height },
+                [width, height, 1],
+            );
+            this.device.queue.submit([encoder.finish()]);
+            await readback.mapAsync(GPUMapMode.READ);
+            mapped = true;
+            const source = new Uint16Array(readback.getMappedRange());
+            const sourceRowStride = bytesPerRow / 2;
+            const data = new Float32Array(width * height * 4);
+            for (let y = 0; y < height; y += 1) {
+                for (let x = 0; x < width; x += 1) {
+                    const sourceOffset = y * sourceRowStride + x * 4;
+                    const targetOffset = (y * width + x) * 4;
+                    for (let channel = 0; channel < 4; channel += 1) {
+                        data[targetOffset + channel] = float16ToNumber(source[sourceOffset + channel]);
+                    }
+                }
+            }
+            return { width, height, spp: this.sampleCount, data };
+        } finally {
+            if (mapped) readback.unmap();
+            readback.destroy();
+        }
     }
 
     getStats() {
@@ -265,6 +383,7 @@ export class RayTraceRenderer extends Renderer {
             spp: this.sampleCount,
             triangleCount: this.packedScene?.metadata?.triangleCount || 0,
             instanceCount: this.packedScene?.metadata?.instanceCount || 0,
+            diagnostics: { ...this.diagnostics },
         };
     }
 

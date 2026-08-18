@@ -27,6 +27,7 @@ function mockDevice() {
     createShaderModule: jest.fn((desc) => ({ desc })),
     createComputePipeline: jest.fn((desc) => ({ desc })),
     createRenderPipeline: jest.fn((desc) => ({ desc })),
+    createCommandEncoder: jest.fn(),
   };
 }
 
@@ -47,6 +48,7 @@ function mockEncoder(events = []) {
     encoder: {
       beginComputePass: jest.fn(() => { events.push('compute-begin'); return computePass; }),
       beginRenderPass: jest.fn(() => { events.push('render-begin'); return renderPass; }),
+      copyBufferToBuffer: jest.fn(),
     },
     computePass,
     renderPass,
@@ -55,7 +57,19 @@ function mockEncoder(events = []) {
 
 function rayDrawable() {
   const scene = createCornellBoxScene();
-  return { kind: 'raytrace', scene, acceleration: buildAccelerationStructures(scene) };
+  return {
+    kind: 'raytrace',
+    scene,
+    acceleration: buildAccelerationStructures(scene),
+    revisions: {
+      geometryRevision: 0,
+      instanceRevision: 0,
+      materialRevision: 0,
+      lightRevision: 0,
+      cameraRevision: 0,
+      settingsRevision: 0,
+    },
+  };
 }
 
 function camera() {
@@ -91,6 +105,7 @@ describe('RayTraceRenderer', () => {
       COPY_SRC: 0x01, TEXTURE_BINDING: 0x04, STORAGE_BINDING: 0x08, RENDER_ATTACHMENT: 0x10,
     };
     global.GPUShaderStage = { FRAGMENT: 0x02, COMPUTE: 0x04 };
+    global.GPUMapMode = { READ: 0x01 };
   });
 
   test('prepares explicit pipelines and packed Cornell scene resources', () => {
@@ -127,7 +142,96 @@ describe('RayTraceRenderer', () => {
     const uniformWrite = device.queue.writeBuffer.mock.calls.find(([buffer]) => buffer === renderer.frameResources.uniformBuffer);
     const uniforms = new DataView(uniformWrite[2]);
     expect(uniforms.getUint32(FRAME_UNIFORM_OFFSETS.dimensions + 8, true)).toBe(0);
-    expect(uniforms.getUint32(FRAME_UNIFORM_OFFSETS.renderSettings, true)).toBe(1);
+    expect(uniforms.getUint32(FRAME_UNIFORM_OFFSETS.renderSettings, true)).toBe(4);
+    expect(recorded.encoder.copyBufferToBuffer).toHaveBeenCalledWith(
+      renderer.frameResources.diagnosticsBuffer,
+      0,
+      renderer.frameResources.diagnosticsReadbackBuffer,
+      0,
+      16,
+    );
+  });
+
+  test('accumulates samples-per-frame and resets for every explicit revision field', () => {
+    const device = mockDevice();
+    const renderer = new RayTraceRenderer(device, 'bgra8unorm');
+    const drawable = rayDrawable();
+    renderer.setShader(shaderSource);
+    renderer.prepare(drawable);
+    renderer.setSettings({ maxBounces: 6, samplesPerFrame: 2 });
+    const recorded = frame(12, 10);
+    recorded.frame.device = device;
+
+    renderer.record(recorded.frame, drawable);
+    renderer.record(recorded.frame, drawable);
+    expect(renderer.getStats().spp).toBe(4);
+    const frameWrites = device.queue.writeBuffer.mock.calls.filter(([buffer]) => buffer === renderer.frameResources.uniformBuffer);
+    const secondUniforms = new DataView(frameWrites.at(-1)[2]);
+    expect(secondUniforms.getUint32(FRAME_UNIFORM_OFFSETS.dimensions + 8, true)).toBe(2);
+    expect(secondUniforms.getUint32(FRAME_UNIFORM_OFFSETS.renderSettings, true)).toBe(6);
+    expect(secondUniforms.getUint32(FRAME_UNIFORM_OFFSETS.renderSettings + 4, true)).toBe(2);
+
+    for (const field of [
+      'geometryRevision', 'instanceRevision', 'materialRevision',
+      'lightRevision', 'cameraRevision', 'settingsRevision',
+    ]) {
+      drawable.revisions[field] += 1;
+      renderer.record(recorded.frame, drawable);
+      expect(renderer.getStats().spp).toBe(2);
+    }
+  });
+
+  test('reads padded rgba16float accumulation into tightly packed float32 values', async () => {
+    const device = mockDevice();
+    device.queue.submit = jest.fn();
+    const renderer = new RayTraceRenderer(device, 'bgra8unorm');
+    const drawable = rayDrawable();
+    renderer.setShader(shaderSource);
+    renderer.prepare(drawable);
+    const recorded = frame(1, 1);
+    recorded.frame.device = device;
+    renderer.record(recorded.frame, drawable);
+
+    const mapped = new Uint16Array(128);
+    mapped.set([0x3c00, 0x3800, 0x0000, 0x3c00]);
+    const readback = {
+      size: 256,
+      mapAsync: jest.fn(async () => {}),
+      getMappedRange: jest.fn(() => mapped.buffer),
+      unmap: jest.fn(),
+      destroy: jest.fn(),
+    };
+    device.createBuffer.mockImplementationOnce(() => readback);
+    const copyEncoder = {
+      copyTextureToBuffer: jest.fn(),
+      finish: jest.fn(() => ({ commands: true })),
+    };
+    device.createCommandEncoder.mockReturnValue(copyEncoder);
+    const result = await renderer.readAccumulation();
+    expect([...result.data]).toEqual([1, 0.5, 0, 1]);
+    expect(result).toMatchObject({ width: 1, height: 1, spp: 1 });
+    expect(copyEncoder.copyTextureToBuffer.mock.calls[0][1]).toMatchObject({ bytesPerRow: 256, rowsPerImage: 1 });
+    expect(readback.unmap).toHaveBeenCalledTimes(1);
+    expect(readback.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  test('maps copied diagnostic counters without blocking record()', async () => {
+    const device = mockDevice();
+    const renderer = new RayTraceRenderer(device, 'bgra8unorm');
+    const drawable = rayDrawable();
+    renderer.setShader(shaderSource);
+    renderer.prepare(drawable);
+    const recorded = frame(4, 4);
+    recorded.frame.device = device;
+    renderer.record(recorded.frame, drawable);
+
+    const diagnostics = renderer.frameResources.diagnosticsReadbackBuffer;
+    diagnostics.mapState = 'unmapped';
+    diagnostics.mapAsync = jest.fn(async () => { diagnostics.mapState = 'mapped'; });
+    diagnostics.getMappedRange = jest.fn(() => new Uint32Array([2, 3, 40, 0]).buffer);
+    diagnostics.unmap = jest.fn(() => { diagnostics.mapState = 'unmapped'; });
+    await expect(renderer.readDiagnostics()).resolves.toEqual({ stackOverflows: 2, nonFinite: 3, rays: 40 });
+    expect(renderer.getStats().diagnostics).toEqual({ stackOverflows: 2, nonFinite: 3, rays: 40 });
   });
 
   test('resizes accumulation targets and resets samples on camera/settings changes', () => {
@@ -197,6 +301,9 @@ describe('RayTraceRenderer', () => {
     expect(shaderSource).toContain('@group(0) @binding(7) var<storage, read_write> diagnostics');
     expect(shaderSource).toContain('@compute @workgroup_size(8, 8, 1)');
     expect(shaderSource).toContain('intersectScene(shadowRay, epsilon, distance - epsilon, true)');
+    expect(shaderSource).toContain('fn sampleCosineHemisphere');
+    expect(shaderSource).toContain('if (bounce >= 2u)');
+    expect(shaderSource).toContain('batchSampleSum');
     expect(shaderSource).toContain('fn fs_display');
   });
 });

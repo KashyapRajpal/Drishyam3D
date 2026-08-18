@@ -7,6 +7,8 @@ const FRAME_FLAG_HAS_TLAS : u32 = 1u;
 const TRIANGLE_EPSILON : f32 = 1e-8;
 const INFINITY_DISTANCE : f32 = 1e30;
 const STACK_CAPACITY : u32 = 64u;
+const MAX_BOUNCES : u32 = 16u;
+const MAX_SAMPLES_PER_FRAME : u32 = 16u;
 const PI : f32 = 3.141592653589793;
 
 struct Vertex {
@@ -404,7 +406,26 @@ fn estimateDirect(hit : WorldHit, incomingRay : Ray, material : Material, rng : 
     return material.baseColor.xyz * emitted * (surfaceCosine * lightCosine * area / (distanceSquared * PI));
 }
 
-fn samplePrimary(pixel : vec2<u32>, rng : ptr<function, u32>) -> vec3<f32> {
+fn sampleCosineHemisphere(normal : vec3<f32>, rng : ptr<function, u32>) -> vec3<f32> {
+    let radialSample = clamp(rngNext(rng), 1e-7, 1.0 - 1e-7);
+    let angularSample = rngNext(rng);
+    let radius = sqrt(radialSample);
+    let angle = 2.0 * PI * angularSample;
+    let local = vec3<f32>(radius * cos(angle), radius * sin(angle), sqrt(max(0.0, 1.0 - radialSample)));
+    let helper = select(vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(0.0, 1.0, 0.0), abs(normal.z) >= 0.999);
+    let tangent = normalize(cross(helper, normal));
+    let bitangent = cross(normal, tangent);
+    return normalize(tangent * local.x + bitangent * local.y + normal * local.z);
+}
+
+fn orientedGeometricNormal(hit : WorldHit, incomingDirection : vec3<f32>) -> vec3<f32> {
+    if (dot(incomingDirection, hit.geometricNormal) < 0.0) {
+        return hit.geometricNormal;
+    }
+    return -hit.geometricNormal;
+}
+
+fn samplePath(pixel : vec2<u32>, rng : ptr<function, u32>) -> vec3<f32> {
     let dimensions = vec2<f32>(frame.dimensions.xy);
     let jitter = vec2<f32>(rngNext(rng), rngNext(rng));
     let uv = (vec2<f32>(pixel) + jitter) / dimensions;
@@ -415,14 +436,46 @@ fn samplePrimary(pixel : vec2<u32>, rng : ptr<function, u32>) -> vec3<f32> {
         + frame.cameraRight.xyz * (ndc.x * aspect * frame.cameraForward.w)
         + frame.cameraUp.xyz * (ndc.y * frame.cameraForward.w)
     );
-    let ray = Ray(frame.cameraPosition.xyz, direction);
-    let hit = intersectScene(ray, frame.numerical.x, INFINITY_DISTANCE, false);
-    if (hit.valid == 0u) {
-        return frame.environment.xyz * frame.numerical.z;
+    var ray = Ray(frame.cameraPosition.xyz, direction);
+    var radiance = vec3<f32>(0.0);
+    var throughput = vec3<f32>(1.0);
+    let bounceLimit = min(frame.renderSettings.x, MAX_BOUNCES);
+    for (var bounce = 0u; bounce < bounceLimit; bounce += 1u) {
+        let hit = intersectScene(ray, frame.numerical.x, INFINITY_DISTANCE, false);
+        if (hit.valid == 0u) {
+            radiance += throughput * frame.environment.xyz * frame.numerical.z;
+            break;
+        }
+        let material = materials[hit.materialIndex];
+        if (bounce == 0u) {
+            radiance += throughput * material.emissive.xyz * material.emissive.w;
+        }
+        radiance += throughput * estimateDirect(hit, ray, material, rng);
+        if (bounce + 1u >= bounceLimit) {
+            break;
+        }
+
+        let nextDirection = sampleCosineHemisphere(hit.shadingNormal, rng);
+        throughput *= material.baseColor.xyz;
+        if (any(throughput != throughput)
+            || any(abs(throughput) >= vec3<f32>(INFINITY_DISTANCE))
+            || max(throughput.x, max(throughput.y, throughput.z)) <= 0.0) {
+            break;
+        }
+        if (bounce >= 2u) {
+            let survival = clamp(max(throughput.x, max(throughput.y, throughput.z)), 0.05, 0.95);
+            if (rngNext(rng) > survival) {
+                break;
+            }
+            throughput /= survival;
+        }
+        var offsetNormal = orientedGeometricNormal(hit, ray.direction);
+        if (dot(offsetNormal, nextDirection) < 0.0) {
+            offsetNormal = -offsetNormal;
+        }
+        ray = Ray(hit.position + offsetNormal * frame.numerical.x, nextDirection);
     }
-    let material = materials[hit.materialIndex];
-    let emission = material.emissive.xyz * material.emissive.w;
-    return emission + estimateDirect(hit, ray, material, rng);
+    return max(radiance, vec3<f32>(0.0));
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -431,16 +484,22 @@ fn cs_raytrace(@builtin(global_invocation_id) invocation : vec3<u32>) {
     if (pixel.x >= frame.dimensions.x || pixel.y >= frame.dimensions.y) {
         return;
     }
-    var rng = frame.dimensions.w
-        ^ (pixel.x * 0x9e3779b9u)
-        ^ (pixel.y * 0x85ebca6bu)
-        ^ (frame.dimensions.z * 0xc2b2ae35u);
-    let sample = samplePrimary(pixel, &rng);
+    let batchSampleCount = min(frame.renderSettings.y, MAX_SAMPLES_PER_FRAME);
+    var batchSampleSum = vec3<f32>(0.0);
+    for (var sampleOffset = 0u; sampleOffset < batchSampleCount; sampleOffset += 1u) {
+        let globalSampleIndex = frame.dimensions.z + sampleOffset;
+        var rng = frame.dimensions.w
+            ^ (pixel.x * 0x9e3779b9u)
+            ^ (pixel.y * 0x85ebca6bu)
+            ^ (globalSampleIndex * 0xc2b2ae35u);
+        batchSampleSum += samplePath(pixel, &rng);
+    }
     let oldSampleCount = frame.dimensions.z;
-    var average = sample;
+    let nextSampleCount = oldSampleCount + batchSampleCount;
+    var average = batchSampleSum / f32(batchSampleCount);
     if (oldSampleCount > 0u) {
         let previous = textureLoad(previousAccumulation, vec2<i32>(pixel), 0).xyz;
-        average = (previous * f32(oldSampleCount) + sample) / f32(oldSampleCount + 1u);
+        average = (previous * f32(oldSampleCount) + batchSampleSum) / f32(nextSampleCount);
     }
     if (any(average != average) || any(abs(average) >= vec3<f32>(INFINITY_DISTANCE))) {
         atomicAdd(&diagnostics.nonFiniteCount, 1u);
