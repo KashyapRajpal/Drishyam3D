@@ -174,6 +174,9 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
             shDegree,
             count: payload.count,
             bounds: payload.bounds,
+            // Cloud is normalized to origin/radius-1 at load; this maps back to
+            // the capture's original world frame (see normalizeInPlace).
+            sourceTransform: payload.sourceTransform ?? null,
             positions: payload.positions, // world-space centers, for the Culled reduction's grid
             _debug: { name: 'splat cloud' },
         };
