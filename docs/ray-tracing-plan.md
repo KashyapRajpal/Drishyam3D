@@ -1418,8 +1418,12 @@ Implementation status:
 
 | Packet | Status | Evidence |
 |---|---|---|
-| RT-001 through RT-005 | Not started | — |
-| RT-005A | Not started | — |
+| RT-001 | Complete | `de98c31`; matrix/camera/camera-ray focused tests |
+| RT-002 | Complete | `9427022`; `npm test -- --runInBand __tests__/ray-scene.test.js` |
+| RT-003 | Complete | `a54aab7`; `npm test -- --runInBand __tests__/cornell-box.test.js` |
+| RT-004 | Complete | `fe34b29`; `npm test -- --runInBand __tests__/intersections.test.js` |
+| RT-005 | Complete | `dcc422b`; BVH/BLAS/intersection focused tests, including 1,000 seeded rays |
+| RT-005A | Complete | `46c90d6`; TLAS/BLAS/intersection focused tests, including 1,000 seeded rays |
 | RT-006 through RT-010 | Not started | — |
 | RT-010A | Not started | — |
 | RT-010B | Not started | — |
