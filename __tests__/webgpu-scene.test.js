@@ -1,4 +1,4 @@
-const mockRendererInstances = { mesh: [], splat: [], tile: [], ray: [] };
+const mockRendererInstances = { mesh: [], splat: [], tile: [], ray: [], hybrid: [] };
 
 function mockRenderer(kind) {
   const renderer = {
@@ -38,6 +38,9 @@ jest.mock('../scripts/engine/renderers/splat-tile-renderer.js', () => ({
 }));
 jest.mock('../scripts/engine/renderers/raytrace-renderer.js', () => ({
   RayTraceRenderer: jest.fn(() => mockRenderer('ray')),
+}));
+jest.mock('../scripts/engine/renderers/hybrid-shadow-renderer.js', () => ({
+  HybridShadowRenderer: jest.fn(() => mockRenderer('hybrid')),
 }));
 
 const mockTimers = [];
@@ -82,6 +85,7 @@ function setup() {
     splat: mockRendererInstances.splat.at(-1),
     tile: mockRendererInstances.tile.at(-1),
     ray: mockRendererInstances.ray.at(-1),
+    hybrid: mockRendererInstances.hybrid.at(-1),
   };
 }
 
@@ -141,16 +145,36 @@ describe('WebGPU scene ray tracing registry', () => {
     expect(() => scene.setRenderMode('raytrace-gpu')).toThrow(/shader is unavailable/);
     scene.setRayTracingShader('ray wgsl');
     expect(() => scene.setRenderMode('raytrace-gpu')).toThrow(/No ray-traceable scene/);
-    expect(() => scene.setRenderMode('hybrid-shadows')).toThrow(/Unsupported WebGPU render mode/);
+    expect(() => scene.setRenderMode('hybrid-shadows')).toThrow(/shaders are unavailable/);
     try {
-      scene.setRenderMode('hybrid-shadows');
+      scene.setRenderMode('unknown-mode');
     } catch (error) {
       expect(error.code).toBe('UNSUPPORTED_RENDER_MODE');
     }
   });
 
+  test('dispatches hybrid mesh frames with animation and requires a ray sidecar', () => {
+    const { scene, hybrid } = setup();
+    const update = jest.fn();
+    scene.updateUserScript({ init: jest.fn(), update });
+    scene.setHybridShaders('gbuffer wgsl', 'composite wgsl');
+    scene.loadGeometry({ kind: 'mesh', vertexCount: 3 });
+    expect(() => scene.setRenderMode('hybrid-shadows')).toThrow(/ray-traceable mesh sidecar/);
+
+    const drawable = {
+      kind: 'mesh', vertexCount: 6, bounds: { radius: 1 }, rayTracing: { preparedRayScene: {} },
+    };
+    scene.loadGeometry(drawable);
+    scene.setRenderMode('hybrid-shadows');
+    scene.start();
+    scheduled.shift()(16);
+    expect(hybrid.prepare).toHaveBeenCalledWith(drawable);
+    expect(hybrid.record).toHaveBeenCalledWith(expect.objectContaining({ width: 80, height: 60 }), drawable);
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+
   test('routes settings, partial TLAS updates, stats, and idempotent cleanup', () => {
-    const { scene, mesh, splat, tile, ray } = setup();
+    const { scene, mesh, splat, tile, ray, hybrid } = setup();
     const rasterDrawable = { kind: 'mesh', vertexCount: 6 };
     const rayDrawable = { kind: 'raytrace' };
     scene.loadGeometry(rasterDrawable);
@@ -173,6 +197,7 @@ describe('WebGPU scene ray tracing registry', () => {
     expect(splat.destroy).toHaveBeenCalledTimes(1);
     expect(tile.destroy).toHaveBeenCalledTimes(1);
     expect(ray.destroy).toHaveBeenCalledTimes(1);
+    expect(hybrid.destroy).toHaveBeenCalledTimes(1);
     expect(ray.releaseDrawable).toHaveBeenCalledTimes(1);
   });
 });

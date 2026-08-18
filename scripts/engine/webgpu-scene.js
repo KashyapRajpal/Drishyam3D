@@ -15,6 +15,7 @@ import { MeshRenderer } from './renderers/mesh-renderer.js';
 import { SplatRenderer } from './renderers/splat-renderer.js';
 import { SplatTileRenderer } from './renderers/splat-tile-renderer.js';
 import { RayTraceRenderer } from './renderers/raytrace-renderer.js';
+import { HybridShadowRenderer } from './renderers/hybrid-shadow-renderer.js';
 import { GpuTimer } from './gpu-timer.js';
 
 export function createWebGPUScene(device, context, format, canvas, camera) {
@@ -40,7 +41,9 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
     const splatRenderer = new SplatRenderer(device, format);
     const splatTileRenderer = new SplatTileRenderer(device, format);
     const rayTraceRenderer = new RayTraceRenderer(device, format);
+    const hybridShadowRenderer = new HybridShadowRenderer(device, format);
     let rayShaderReady = false;
+    let hybridShadersReady = false;
     let activeSplatRenderer = splatRenderer; // Toggle between instanced and tile modes
     const renderers = new Map([
         ['mesh', meshRenderer],
@@ -50,6 +53,7 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
     function rendererFor(target, requestedMode = renderMode) {
         if (!target) return null;
         if (requestedMode === 'raytrace-gpu') return target.kind === 'raytrace' ? rayTraceRenderer : null;
+        if (requestedMode === 'hybrid-shadows') return target.kind === 'mesh' ? hybridShadowRenderer : null;
         const kind = target.kind ?? 'mesh';
         if (kind === 'splat') return activeSplatRenderer;
         return renderers.get(kind) ?? null;
@@ -63,8 +67,11 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
         if (next === rasterDrawable) return;
         const previous = rasterDrawable;
         rasterDrawable = next;
-        if (previous) rendererFor(previous, 'raster')?.releaseDrawable(previous);
-        if (renderMode === 'raster') rendererFor(rasterDrawable, 'raster')?.prepare(rasterDrawable);
+        if (previous) {
+            rendererFor(previous, 'raster')?.releaseDrawable(previous);
+            if ((previous.kind ?? 'mesh') === 'mesh') hybridShadowRenderer.releaseDrawable(previous);
+        }
+        if (renderMode !== 'raytrace-gpu') rendererFor(rasterDrawable, renderMode)?.prepare(rasterDrawable);
         forceUpdate({ reinitScript: true });
     }
 
@@ -173,7 +180,7 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
 
         // The user script mutates sceneState.modelViewMatrix as the model matrix.
         sceneState.modelViewMatrix = createIdentityMatrix();
-        if (renderMode === 'raster') {
+        if (renderMode === 'raster' || renderMode === 'hybrid-shadows') {
             try { userScript.update(sceneState, deltaTime); } catch (e) { /* ignore */ }
         }
 
@@ -210,6 +217,7 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
             meshRenderer.init();
             splatRenderer.init();
             splatTileRenderer.init();
+            hybridShadowRenderer.init();
             forceUpdate({ reinitScript: true });
         },
 
@@ -293,8 +301,22 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
             return true;
         },
 
+        setHybridShaders(gbufferSource, compositeSource) {
+            if (!gbufferSource || !compositeSource) return false;
+            hybridShadowRenderer.setShaders(gbufferSource, compositeSource);
+            hybridShadersReady = true;
+            if (renderMode === 'hybrid-shadows' && rasterDrawable) hybridShadowRenderer.prepare(rasterDrawable);
+            forceUpdate();
+            return true;
+        },
+
+        setHybridLight(light) {
+            hybridShadowRenderer.setLight(light);
+            forceUpdate();
+        },
+
         setRenderMode(nextMode) {
-            if (nextMode !== 'raster' && nextMode !== 'raytrace-gpu') {
+            if (nextMode !== 'raster' && nextMode !== 'raytrace-gpu' && nextMode !== 'hybrid-shadows') {
                 throw unsupportedMode(`Unsupported WebGPU render mode: ${nextMode}`);
             }
             if (nextMode === renderMode) return;
@@ -302,6 +324,15 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
                 if (!rayShaderReady) throw unsupportedMode('GPU ray tracing shader is unavailable.');
                 if (!rayDrawable) throw unsupportedMode('No ray-traceable scene is loaded.');
                 rayTraceRenderer.prepare(rayDrawable);
+            } else if (nextMode === 'hybrid-shadows') {
+                if (!hybridShadersReady) throw unsupportedMode('Hybrid shadow shaders are unavailable.');
+                if (!rasterDrawable || (rasterDrawable.kind ?? 'mesh') !== 'mesh') {
+                    throw unsupportedMode('Hybrid shadows require a triangle mesh drawable.');
+                }
+                if (!rasterDrawable.rayTracing?.preparedRayScene) {
+                    throw unsupportedMode('Hybrid shadows require a ray-traceable mesh sidecar.');
+                }
+                hybridShadowRenderer.prepare(rasterDrawable);
             } else if (rasterDrawable) {
                 rendererFor(rasterDrawable, 'raster')?.prepare(rasterDrawable);
             }
@@ -404,6 +435,14 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
                     passMs: gpuTimer.getDurations(),
                 };
             }
+            if (renderMode === 'hybrid-shadows') {
+                return {
+                    ...hybridShadowRenderer.getStats(),
+                    fps: displayFps,
+                    frameMs: displayMs,
+                    passMs: gpuTimer.getDurations(),
+                };
+            }
             const isSplat = drawable?.kind === 'splat';
             const info = isSplat ? activeSplatRenderer.getReductionInfo?.() : null;
             const total = isSplat ? drawable.count : 0;
@@ -428,12 +467,16 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
             destroyed = true;
             active = false;
             paused = true;
-            if (rasterDrawable) rendererFor(rasterDrawable, 'raster')?.releaseDrawable(rasterDrawable);
+            if (rasterDrawable) {
+                rendererFor(rasterDrawable, 'raster')?.releaseDrawable(rasterDrawable);
+                if ((rasterDrawable.kind ?? 'mesh') === 'mesh') hybridShadowRenderer.releaseDrawable(rasterDrawable);
+            }
             if (rayDrawable) rayTraceRenderer.releaseDrawable(rayDrawable);
             meshRenderer.destroy();
             splatRenderer.destroy();
             splatTileRenderer.destroy();
             rayTraceRenderer.destroy();
+            hybridShadowRenderer.destroy();
             gpuTimer.destroy();
             rasterDrawable = null;
             rayDrawable = null;

@@ -133,6 +133,7 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
     const scene  = createWebGPUScene(device, context, format, canvas, camera);
     let rayState = null;
     let rayTracingError = null;
+    let hybridError = null;
     let destroyed = false;
 
     // Load default cube geometry
@@ -376,6 +377,10 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
         scene.setRayTracingSettings(partial);
     }
 
+    function setLight(light) {
+        scene.setHybridLight(light);
+    }
+
     if (!shaderSources?.wgsl) {
         errorHandler(new Error('Missing WGSL shader source.'));
         return null;
@@ -401,6 +406,14 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
             errorHandler(error);
         }
     }
+    if (shaderSources.hybridGbufferWgsl && shaderSources.hybridCompositeWgsl) {
+        try {
+            scene.setHybridShaders(shaderSources.hybridGbufferWgsl, shaderSources.hybridCompositeWgsl);
+        } catch (error) {
+            hybridError = error;
+            errorHandler(error);
+        }
+    }
     setScriptSource(scriptSource);
     scene.start();
 
@@ -408,7 +421,7 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
         device, scene, camera,
         setShaders, setScriptSource,
         loadSplats, setSplatFlipY, loadMesh, setSplatDebugMode, setSplatShDegree, setSplatRenderMode, setSplatReduction, setSplatSort,
-        loadRayScene, loadCornellBox, setRenderMode, setRayTracingSettings,
+        loadRayScene, loadCornellBox, setRenderMode, setRayTracingSettings, setLight,
         resetAccumulation: () => scene.resetRayAccumulation(),
         getRenderMode: () => scene.getRenderMode(),
         getCapabilities: () => ({
@@ -416,6 +429,14 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
             'raytrace-gpu': {
                 available: !!shaderSources.raytraceWgsl && !rayTracingError,
                 reason: rayTracingError?.message || (!shaderSources.raytraceWgsl ? 'GPU ray tracing shader is unavailable.' : undefined),
+            },
+            'hybrid-shadows': {
+                available: !!shaderSources.hybridGbufferWgsl && !!shaderSources.hybridCompositeWgsl && !hybridError,
+                reason: hybridError?.message || (
+                    !shaderSources.hybridGbufferWgsl || !shaderSources.hybridCompositeWgsl
+                        ? 'Hybrid shadow shaders are unavailable.'
+                        : undefined
+                ),
             },
         }),
         readRayAccumulation: () => scene.readRayAccumulation(),

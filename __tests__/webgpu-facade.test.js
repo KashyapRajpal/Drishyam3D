@@ -3,6 +3,8 @@ const mockScene = {
   updatePipeline: jest.fn(),
   updateUserScript: jest.fn(),
   setRayTracingShader: jest.fn(() => true),
+  setHybridShaders: jest.fn(() => true),
+  setHybridLight: jest.fn(),
   setRenderMode: jest.fn(),
   setRayTracingSettings: jest.fn(),
   resetRayAccumulation: jest.fn(),
@@ -151,5 +153,22 @@ describe('WebGPU Facade', () => {
     });
     expect(result.getCapabilities()['raytrace-gpu']).toMatchObject({ available: false });
     expect(result.getCapabilities()['raytrace-gpu'].reason).toMatch(/shader is unavailable/);
+  });
+
+  test('registers hybrid shaders, light controls, and capability state', async () => {
+    const result = await initWebGPUEngine({
+      canvas: fakeCanvas,
+      shaderSources: {
+        wgsl: 'mesh shader',
+        hybridGbufferWgsl: 'gbuffer shader',
+        hybridCompositeWgsl: 'composite shader',
+      },
+      scriptSource: 'function init(){}\nfunction update(){}',
+      onError: jest.fn(),
+    });
+    expect(mockScene.setHybridShaders).toHaveBeenCalledWith('gbuffer shader', 'composite shader');
+    expect(result.getCapabilities()['hybrid-shadows']).toEqual({ available: true, reason: undefined });
+    result.setLight({ type: 'directional', direction: [0, -1, 0] });
+    expect(mockScene.setHybridLight).toHaveBeenCalledWith({ type: 'directional', direction: [0, -1, 0] });
   });
 });
