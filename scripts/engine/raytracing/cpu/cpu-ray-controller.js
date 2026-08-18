@@ -79,6 +79,22 @@ export function createCpuRayController({ workerFactory, presentTile, onStats, on
             running = true;
             requestPass();
         },
+        updateInstances(instances, tlas, instanceRevision) {
+            if (!retained) throw new Error('CPU ray controller must be initialized before instance updates.');
+            const oldGeneration = generation;
+            generation += 1;
+            ready = false;
+            passIndex = 0;
+            stats = { ...stats, spp: 0, raysPerSecond: 0, frameMs: 0, rays: 0 };
+            retained = {
+                ...retained,
+                preparedScene: { ...retained.preparedScene, instances },
+                acceleration: { ...retained.acceleration, tlas },
+            };
+            post({ type: 'cancel', generation: oldGeneration });
+            post({ type: 'update-instances', generation, instances, tlas, instanceRevision });
+            return generation;
+        },
         reset(nextRenderRequest) {
             if (!retained) return;
             const wasRunning = running;

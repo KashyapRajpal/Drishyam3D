@@ -60,6 +60,24 @@ describe('CPU ray controller', () => {
     expect(worker.postMessage).toHaveBeenCalledTimes(callCount);
   });
 
+  test('instance updates advance generation and preserve BLAS-owned state', () => {
+    const { worker, controller } = setup();
+    const firstGeneration = controller.initialize(
+      { instances: ['old'] }, { blases: ['shared'], tlas: 'old-tlas' }, {},
+    );
+    controller.render({ width: 1, height: 1, cameraFrame: {} });
+    const nextGeneration = controller.updateInstances(['new'], 'new-tlas', 3);
+    expect(nextGeneration).toBe(firstGeneration + 1);
+    expect(worker.postMessage.mock.calls.at(-1)[0]).toEqual({
+      type: 'update-instances', generation: nextGeneration,
+      instances: ['new'], tlas: 'new-tlas', instanceRevision: 3,
+    });
+    worker.emit({ type: 'ready', generation: nextGeneration });
+    expect(worker.postMessage.mock.calls.at(-1)[0]).toMatchObject({
+      type: 'render', generation: nextGeneration, passIndex: 0,
+    });
+  });
+
   test('pause/resume resets partial accumulation and destroy is idempotent', () => {
     const { worker, controller } = setup();
     const firstGeneration = controller.initialize({}, {}, {});
