@@ -16,6 +16,7 @@ import splatSortWgsl from '@assets/shaders/splat-sort.wgsl?raw'
 import blitWgsl from '@assets/shaders/blit.wgsl?raw'
 import tileRenderWgsl from '@assets/shaders/splat-tile-render.wgsl?raw'
 import splatCullWgsl from '@assets/shaders/splat-cull.wgsl?raw'
+import splatRadixWgsl from '@assets/shaders/splat-radix-sort.wgsl?raw'
 import defaultScript from '@scripts/scene-script.js?raw'
 import logoJpg from '@assets/logo/drishyam3d_logo.jpg'
 import { setupSettings } from '@engine/settings.js'
@@ -101,7 +102,19 @@ function StatsOverlay({ stats }) {
         </div>
       )}
       {stats.passMs?.reduce != null && <div style={{ color: '#fc6' }}>reduce {stats.passMs.reduce.toFixed(2)}ms</div>}
-      {stats.passMs?.sort != null && <div style={{ color: '#fc6' }}>sort {stats.passMs.sort.toFixed(2)}ms</div>}
+      {/* GpuTimer withholds stale readings, so a missing value means "no recent
+          sample" — show a dash rather than dropping the line, which would read as
+          "this pass stopped running". */}
+      {stats.splatCount > 0 && (
+        <div style={{ color: '#fc6' }}>
+          sort ({stats.sortMode}) {stats.passMs?.sort != null ? `${stats.passMs.sort.toFixed(2)}ms` : '—'}
+        </div>
+      )}
+      {stats.splatCount > 0 && (
+        <div style={{ color: '#fc6' }}>
+          render {stats.passMs?.render != null ? `${stats.passMs.render.toFixed(2)}ms` : '—'}
+        </div>
+      )}
     </div>
   )
 }
@@ -190,6 +203,7 @@ export default function App(){
             blitWgsl,
             tileRenderWgsl,
             splatCullWgsl,
+            splatRadixWgsl,
           }
         : { vertex: fileContents[defaultVertPath], fragment: fileContents[defaultFragPath] }
 
@@ -280,6 +294,15 @@ export default function App(){
       engine.setSplatRenderMode(splatRenderMode)
     }
   }, [engineReady, splatRenderMode, splatLoaded])
+
+  // Apply the ordering sort axis to the active engine.
+  useEffect(() => {
+    if (!engineReady) return
+    const engine = engineRef.current
+    if (engine && typeof engine.setSplatSort === 'function') {
+      engine.setSplatSort(splatSort)
+    }
+  }, [engineReady, splatSort, splatLoaded])
 
   // Apply the ordering reduction axis to the active engine.
   useEffect(() => {
@@ -758,7 +781,7 @@ export default function App(){
                   {[
                     { axis: 'Sort', value: splatSort, set: setSplatSort, opts: [
                         { k: 'bitonic', l: 'Bitonic' },
-                        { k: 'radix', l: 'Radix', soon: true },
+                        { k: 'radix', l: 'Radix' },
                     ] },
                     { axis: 'Reduction', value: splatReduction, set: setSplatReduction, opts: [
                         { k: 'none', l: 'None' },

@@ -262,6 +262,54 @@ export function parsePly(arrayBuffer) {
 }
 
 /**
+ * Rescales a parsed cloud into a canonical space: centered on the origin with
+ * radius 1, in place.
+ *
+ * Captures arrive at wildly different world scales — the cluster-fly scenes have
+ * a radius of 0.18 — which forces every downstream constant to be either
+ * per-asset or wrong: camera distance limits, near/far planes, wheel steps, cull
+ * grid extents, distance-cull thresholds. Normalizing once at load makes all of
+ * them fixed numbers.
+ *
+ * Uniform scale + translation, so only positions and scales move:
+ *   - positions: p' = (p - center) / radius
+ *   - scales:    s' = s / radius, which scales the covariance by 1/radius^2
+ *     (packSplats builds Σ from s², so scaling s is the whole job)
+ *   - rotations: invariant (a uniform scale commutes with rotation)
+ *   - SH:        invariant — evaluated against a *normalized* view direction
+ *   - opacity/colour: untouched
+ *
+ * Positions and scales MUST move together or the gaussians deform. The original
+ * frame is preserved as `sourceTransform` so world coordinates stay recoverable
+ * (a mesh sharing the scene is not normalized).
+ *
+ * @param {ReturnType<typeof parsePly>} parsed
+ * @returns {typeof parsed} the same object, mutated.
+ */
+export function normalizeInPlace(parsed) {
+    const { positions, scales, count, bounds } = parsed;
+    // A degenerate cloud (empty, or every splat coincident) has no scale to
+    // normalize by; leaving it untouched beats dividing by zero.
+    if (!bounds || !(bounds.radius > 0)) return parsed;
+
+    const [cx, cy, cz] = bounds.center;
+    const inv = 1 / bounds.radius;
+
+    for (let i = 0; i < count; i++) {
+        positions[i * 3 + 0] = (positions[i * 3 + 0] - cx) * inv;
+        positions[i * 3 + 1] = (positions[i * 3 + 1] - cy) * inv;
+        positions[i * 3 + 2] = (positions[i * 3 + 2] - cz) * inv;
+    }
+    if (scales) {
+        for (let i = 0; i < count * 3; i++) scales[i] *= inv;
+    }
+
+    parsed.sourceTransform = { center: [cx, cy, cz], radius: bounds.radius };
+    parsed.bounds = { center: [0, 0, 0], radius: 1 };
+    return parsed;
+}
+
+/**
  * Reflects a parsed splat cloud about the XZ plane (y -> -y), in place.
  *
  * This is the optional reorientation kept out of `parsePly` so the parser stays a

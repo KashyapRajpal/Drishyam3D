@@ -149,6 +149,26 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
     // creation must stay on the main thread (no device inside the worker), and
     // the SH degree can only be fitted here since it depends on device limits.
     function buildSplatDrawable(payload) {
+        // Checked before allocating: unlike the SH buffer (which fitShDegree
+        // degrades), an oversized splat buffer used to reach createBuffer and fail
+        // as a bare WebGPU validation error with nothing actionable in it.
+        //
+        // Both limits bind. A storage buffer must fit maxStorageBufferBindingSize
+        // *and* maxBufferSize, and their defaults differ (128 MiB vs 256 MiB), so
+        // checking only the binding size lets an allocation past this guard fail
+        // later on the other one.
+        const maxBinding = device.limits.maxStorageBufferBindingSize;
+        const maxBuffer = device.limits.maxBufferSize;
+        const maxSplatBytes = Math.min(maxBinding, maxBuffer);
+        if (payload.packed.byteLength > maxSplatBytes) {
+            const mib = (bytes) => Math.round(bytes / 1048576);
+            throw new Error(
+                `Splat cloud too large for this device: ${payload.count.toLocaleString()} splats ` +
+                `need ${mib(payload.packed.byteLength)} MiB, but this device allows ` +
+                `${mib(maxSplatBytes)} MiB (maxStorageBufferBindingSize ${mib(maxBinding)} MiB, ` +
+                `maxBufferSize ${mib(maxBuffer)} MiB). Load a smaller capture.`,
+            );
+        }
         const storageBuffer = createSplatStorageBuffer(device, payload.packed);
 
         const shDegree = fitShDegree(
@@ -174,6 +194,9 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
             shDegree,
             count: payload.count,
             bounds: payload.bounds,
+            // Cloud is normalized to origin/radius-1 at load; this maps back to
+            // the capture's original world frame (see normalizeInPlace).
+            sourceTransform: payload.sourceTransform ?? null,
             positions: payload.positions, // world-space centers, for the Culled reduction's grid
             _debug: { name: 'splat cloud' },
         };
@@ -233,6 +256,11 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
         scene.setSplatReduction(mode);
     }
 
+    /** Set the ordering sort axis: 'bitonic' or 'radix'. */
+    function setSplatSort(mode) {
+        scene.setSplatSort(mode);
+    }
+
     if (!shaderSources?.wgsl) {
         errorHandler(new Error('Missing WGSL shader source.'));
         return null;
@@ -240,7 +268,12 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
 
     setShaders(shaderSources.wgsl);
     if (shaderSources.splatWgsl && shaderSources.splatSortWgsl) {
-        scene.setSplatShaders(shaderSources.splatWgsl, shaderSources.splatSortWgsl, shaderSources.splatCullWgsl);
+        scene.setSplatShaders(
+            shaderSources.splatWgsl,
+            shaderSources.splatSortWgsl,
+            shaderSources.splatCullWgsl,
+            shaderSources.splatRadixWgsl,
+        );
     }
     if (shaderSources.blitWgsl && shaderSources.tileRenderWgsl) {
         scene.setTileShaders(shaderSources.blitWgsl, shaderSources.tileRenderWgsl);
@@ -251,7 +284,10 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
     return {
         device, scene, camera,
         setShaders, setScriptSource,
-        loadSplats, setSplatFlipY, loadMesh, setSplatDebugMode, setSplatShDegree, setSplatRenderMode, setSplatReduction,
+        loadSplats, setSplatFlipY, loadMesh, setSplatDebugMode, setSplatShDegree, setSplatRenderMode, setSplatReduction, setSplatSort,
+        // Benchmark hook: true end-to-end GPU frame cost, for when fps and
+        // timestamp spans can't be trusted (see webgpu-scene.measureFrameCost).
+        measureFrameCost: (opts) => scene.measureFrameCost(opts),
         getStats: () => scene.getStats(),
         destroy: () => {
             if (splatLoader) splatLoader.destroy();

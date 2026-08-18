@@ -1,5 +1,5 @@
 import { createSplatPipeline, payloadTransferables } from '../scripts/engine/splat-pipeline.js';
-import { parsePly, mirrorYInPlace } from '../scripts/engine/ply-loader.js';
+import { parsePly, mirrorYInPlace, normalizeInPlace } from '../scripts/engine/ply-loader.js';
 import { packSplats } from '../scripts/engine/splat-helpers.js';
 
 const PROPS = [
@@ -47,11 +47,14 @@ const V1 = {
 };
 
 describe('createSplatPipeline', () => {
-  test('load without flip matches direct parse + pack', () => {
+  // The pipeline is parse -> (optional) mirror -> normalize -> pack, so every
+  // expectation below normalizes too; comparing against a bare parse+pack would
+  // be comparing against the pre-normalization contract.
+  test('load without flip matches parse + normalize + pack', () => {
     const buf = buildPly([V0, V1]);
     const payload = createSplatPipeline().load(buf, false);
 
-    const parsed = parsePly(buildPly([V0, V1]));
+    const parsed = normalizeInPlace(parsePly(buildPly([V0, V1])));
     expect(payload.count).toBe(2);
     expect(payload.shDegree).toBe(parsed.shDegree);
     expect(payload.bounds).toEqual(parsed.bounds);
@@ -59,10 +62,10 @@ describe('createSplatPipeline', () => {
     expect(Array.from(payload.packed)).toEqual(Array.from(packSplats(parsed)));
   });
 
-  test('load with flipY matches parse + mirror + pack', () => {
+  test('load with flipY matches parse + mirror + normalize + pack', () => {
     const payload = createSplatPipeline().load(buildPly([V0, V1]), true);
 
-    const mirrored = mirrorYInPlace(parsePly(buildPly([V0, V1])));
+    const mirrored = normalizeInPlace(mirrorYInPlace(parsePly(buildPly([V0, V1]))));
     expect(Array.from(payload.positions)).toEqual(Array.from(mirrored.positions));
     expect(Array.from(payload.packed)).toEqual(Array.from(packSplats(mirrored)));
   });
@@ -71,8 +74,10 @@ describe('createSplatPipeline', () => {
     const pipeline = createSplatPipeline();
     const unflipped = pipeline.load(buildPly([V0, V1]), false);
 
+    // setFlip mirrors the already-normalized cloud, which is centered on the
+    // origin — so the expectation normalizes first, then mirrors.
     const flipped = pipeline.setFlip(true);
-    const mirrored = mirrorYInPlace(parsePly(buildPly([V0, V1])));
+    const mirrored = mirrorYInPlace(normalizeInPlace(parsePly(buildPly([V0, V1]))));
     expect(Array.from(flipped.packed)).toEqual(Array.from(packSplats(mirrored)));
 
     // Toggling back reproduces the original unflipped pack (mirror is its own inverse).

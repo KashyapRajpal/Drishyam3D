@@ -85,8 +85,12 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
     }
 
     function render(now) {
-        if (!active) return;
+        // Cleared before the active check: this callback has fired, so nothing is
+        // scheduled any more either way. Returning early while still holding the
+        // flag would strand it true, and a suspended loop (measureFrameCost) would
+        // then never re-arm — rendering stops permanently after a benchmark.
         rafPending = false;
+        if (!active) return;
         try {
             _renderFrame(now);
         } catch (e) {
@@ -204,9 +208,9 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
             forceUpdate({ reinitScript: false });
         },
 
-        setSplatShaders(splatWgsl, sortWgsl, cullWgsl) {
+        setSplatShaders(splatWgsl, sortWgsl, cullWgsl, radixWgsl) {
             if (!splatWgsl || !sortWgsl) return;
-            splatRenderer.setShaders(splatWgsl, sortWgsl, cullWgsl);
+            splatRenderer.setShaders(splatWgsl, sortWgsl, cullWgsl, radixWgsl);
             if (drawable?.kind === 'splat') splatRenderer.prepare(drawable);
             forceUpdate();
         },
@@ -214,6 +218,13 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
         setSplatReduction(mode) {
             splatRenderer.setReduction(mode);
             if (drawable?.kind === 'splat') splatRenderer.prepare(drawable);
+            forceUpdate();
+        },
+
+        setSplatSort(mode) {
+            // setSort() re-prepares internally (the render bind group holds the
+            // active backend's index buffer), so no prepare() call here.
+            splatRenderer.setSort(mode);
             forceUpdate();
         },
 
@@ -236,6 +247,57 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
             forceUpdate();
         },
 
+        /**
+         * Measures end-to-end GPU cost per frame by rendering frames back to back
+         * and awaiting `queue.onSubmittedWorkDone()` after each.
+         *
+         * This exists because neither existing signal is trustworthy at scale:
+         * `fps` is the rAF callback rate (the GPU queues behind it, so it reads
+         * ~60 while frames take a second), `frameMs` is CPU encode time only, and
+         * timestamp readbacks stop landing entirely on very heavy scenes — a
+         * 3.5M-splat cloud yields zero samples. Waiting on submitted work
+         * measures the thing itself and degrades gracefully instead.
+         *
+         * The rAF loop is paused for the duration so measured frames don't
+         * interleave with scheduled ones.
+         *
+         * @param {{frames?: number, warmup?: number}} [opts]
+         * @returns {Promise<{frames:number, medianMs:number, meanMs:number, minMs:number, maxMs:number}|null>}
+         */
+        async measureFrameCost({ frames = 20, warmup = 3 } = {}) {
+            if (!drawable || !rendererFor(drawable)) return null;
+            const wasActive = active;
+            active = false; // suspend the rAF loop
+            try {
+                for (let i = 0; i < warmup; i++) {
+                    _renderFrame(performance.now());
+                    await device.queue.onSubmittedWorkDone();
+                }
+                const samples = [];
+                for (let i = 0; i < frames; i++) {
+                    const t0 = performance.now();
+                    _renderFrame(performance.now());
+                    await device.queue.onSubmittedWorkDone();
+                    samples.push(performance.now() - t0);
+                }
+                if (samples.length === 0) return null;
+                const sorted = [...samples].sort((a, b) => a - b);
+                return {
+                    frames: sorted.length,
+                    medianMs: sorted[Math.floor(sorted.length / 2)],
+                    meanMs: sorted.reduce((a, b) => a + b, 0) / sorted.length,
+                    minMs: sorted[0],
+                    maxMs: sorted[sorted.length - 1],
+                };
+            } finally {
+                active = wasActive;
+                if (active && !rafPending) {
+                    rafPending = true;
+                    requestAnimationFrame(render);
+                }
+            }
+        },
+
         loadGeometry(newDrawable) {
             setDrawable(newDrawable);
         },
@@ -254,6 +316,7 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
                 triangleCount: drawable?.kind === 'mesh' ? drawable.vertexCount / 3 : 0,
                 splatCount: total,
                 reductionMode: info?.mode ?? 'none',
+                sortMode: info?.sort ?? 'bitonic',
                 // Splats actually drawn after reduction (== total when not culling).
                 visibleSplats: (info && info.visible >= 0) ? info.visible : total,
                 passMs: gpuTimer.getDurations(), // { sort?, reduce? } in ms, GPU timestamp based

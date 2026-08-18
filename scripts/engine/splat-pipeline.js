@@ -13,7 +13,7 @@
  * main thread, so degree fitting happens there), plus `count`/`bounds`/`positions`.
  */
 
-import { parsePly, mirrorYInPlace } from './ply-loader.js';
+import { parsePly, mirrorYInPlace, normalizeInPlace } from './ply-loader.js';
 import { packSplats } from './splat-helpers.js';
 
 /**
@@ -52,6 +52,9 @@ export function createSplatPipeline() {
             shDegree: splatData.shDegree,
             count: splatData.count,
             bounds: splatData.bounds,
+            // Original world frame, so callers can map back out of the
+            // normalized space (see normalizeInPlace).
+            sourceTransform: splatData.sourceTransform ?? null,
         };
     }
 
@@ -63,6 +66,10 @@ export function createSplatPipeline() {
                 mirrorYInPlace(splatData);
                 flipped = true;
             }
+            // After the flip, so the cloud is already in its final orientation
+            // and setFlip() then mirrors an origin-centered cloud about its own
+            // center — which is what the toggle means anyway.
+            normalizeInPlace(splatData);
             return buildPayload();
         },
 

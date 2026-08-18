@@ -19,6 +19,7 @@ import {
     shCoeffCount,
 } from '../splat-helpers.js';
 import { BitonicSortBackend } from '../ordering/bitonic-backend.js';
+import { RadixSortBackend } from '../ordering/radix-backend.js';
 import { NoneReduction } from '../ordering/none-reduction.js';
 import { CulledReduction } from '../ordering/culled-reduction.js';
 
@@ -43,30 +44,37 @@ export class SplatRenderer extends Renderer {
         // Upper bound on SH degree, for A/B-ing view-dependent colour in the UI.
         this.maxShDegree = 3;
 
-        // Pluggable ordering (see docs/splat-ordering.md). Sort axis is fixed to
-        // Bitonic for now; the reduction axis swaps between None (passthrough) and
-        // Culled (frustum cull) via setReduction().
-        this.sortBackend = new BitonicSortBackend(device);
+        // Pluggable ordering (see docs/splat-ordering.md). Both axes swap at
+        // runtime: sort between Bitonic (exact oracle) and Radix via setSort(),
+        // reduction between None (passthrough) and Culled via setReduction().
+        this.bitonicSort = new BitonicSortBackend(device);
+        this.radixSort = new RadixSortBackend(device);
+        this.sortBackend = this.bitonicSort;
         this.noneReduction = new NoneReduction(device);
         this.culledReduction = new CulledReduction(device);
         this.reduction = this.noneReduction;
 
         this.renderBindGroup = null;
         this.debugBindGroup = null;
+        // Held so setSort() can rebuild the render bind group, which binds the
+        // *active* backend's index buffer.
+        this.drawable = null;
     }
 
     init() {
         this.renderParamsBuffer = createUniformBuffer(this.device, RENDER_PARAMS_SIZE);
-        this.sortBackend.init();
+        this.bitonicSort.init();
+        this.radixSort.init();
         this.noneReduction.init();
         this.culledReduction.init();
     }
 
     /** Build the render + debug pipelines; hand the sort + cull WGSL to the backends. */
-    setShaders(splatWgsl, sortWgsl, cullWgsl) {
+    setShaders(splatWgsl, sortWgsl, cullWgsl, radixWgsl) {
         this.renderPipeline = createSplatRenderPipeline(this.device, splatWgsl, this.format);
         this.debugPipeline = createSplatDebugPipeline(this.device, splatWgsl, this.format);
-        this.sortBackend.setShaders(sortWgsl);
+        this.bitonicSort.setShaders(sortWgsl);
+        this.radixSort.setShaders(sortWgsl, radixWgsl);
         if (cullWgsl) this.culledReduction.setShaders(cullWgsl);
     }
 
@@ -79,10 +87,27 @@ export class SplatRenderer extends Renderer {
         this.reduction = mode === 'culled' ? this.culledReduction : this.noneReduction;
     }
 
-    /** Debug info for the stats overlay: active reduction + last visible-splat count. */
+    /**
+     * Select the sort axis: 'bitonic' (exact oracle) or 'radix'.
+     *
+     * Unlike the reduction axis, this must re-prepare: the render bind group
+     * holds the *previous* backend's index buffer, so drawing without a rebuild
+     * would read a stale (or destroyed) buffer. The outgoing backend's
+     * per-drawable buffers are released so only the active one is resident.
+     */
+    setSort(mode) {
+        const next = mode === 'radix' ? this.radixSort : this.bitonicSort;
+        if (next === this.sortBackend) return;
+        this.sortBackend.releaseDrawable(this.drawable);
+        this.sortBackend = next;
+        if (this.drawable) this.prepare(this.drawable);
+    }
+
+    /** Debug info for the stats overlay: active sort/reduction + visible-splat count. */
     getReductionInfo() {
         return {
             mode: this.reduction.name,
+            sort: this.sortBackend.name,
             visible: this.reduction.lastVisibleCount ?? -1, // -1 ⇒ not culling (all visible)
         };
     }
@@ -95,6 +120,7 @@ export class SplatRenderer extends Renderer {
     prepare(drawable) {
         this.renderBindGroup = null;
         this.debugBindGroup = null;
+        this.drawable = drawable ?? null;
         if (!drawable || drawable.kind !== 'splat' || !drawable.count || !drawable.shBuffer) return;
         if (!this.renderPipeline || !this.renderParamsBuffer) return;
 
@@ -167,7 +193,14 @@ export class SplatRenderer extends Renderer {
         const sortResult = this.sortBackend.run(frame, drawable, this.reduction);
 
         // --- Blend pass (instanced billboards, back-to-front) ---
-        const pass = encoder.beginRenderPass({ colorAttachments: [colorAttachment] });
+        // Timed as 'render': with no early-out, every splat rasterizes its full
+        // quad, so this pass — not the sort — is what dominates large scenes.
+        // Measuring it directly beats inferring it by subtracting sort from fps.
+        const renderTs = frame.gpuTimer?.span('render');
+        const pass = encoder.beginRenderPass({
+            colorAttachments: [colorAttachment],
+            ...(renderTs ? { timestampWrites: renderTs } : {}),
+        });
         pass.setPipeline(this.renderPipeline);
         pass.setBindGroup(0, this.renderBindGroup);
         if (sortResult?.indirect) {
@@ -182,15 +215,18 @@ export class SplatRenderer extends Renderer {
         // The storage and SH buffers are owned by the drawable (created by the facade).
         if (drawable?.storageBuffer?.destroy) drawable.storageBuffer.destroy();
         if (drawable?.shBuffer?.destroy) drawable.shBuffer.destroy();
-        this.sortBackend.releaseDrawable(drawable);
+        this.bitonicSort.releaseDrawable(drawable);
+        this.radixSort.releaseDrawable(drawable);
         this.noneReduction.releaseDrawable(drawable);
         this.culledReduction.releaseDrawable(drawable);
         this.renderBindGroup = null;
         this.debugBindGroup = null;
+        this.drawable = null;
     }
 
     destroy() {
-        this.sortBackend.destroy();
+        this.bitonicSort.destroy();
+        this.radixSort.destroy();
         this.noneReduction.destroy();
         this.culledReduction.destroy();
         this.renderParamsBuffer?.destroy?.();
