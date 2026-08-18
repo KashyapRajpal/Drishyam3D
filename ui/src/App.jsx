@@ -19,6 +19,7 @@ import blitWgsl from '@assets/shaders/blit.wgsl?raw'
 import tileRenderWgsl from '@assets/shaders/splat-tile-render.wgsl?raw'
 import splatCullWgsl from '@assets/shaders/splat-cull.wgsl?raw'
 import splatRadixWgsl from '@assets/shaders/splat-radix-sort.wgsl?raw'
+import raytraceWgsl from '@assets/shaders/raytrace.wgsl?raw'
 import defaultScript from '@scripts/scene-script.js?raw'
 import logoJpg from '@assets/logo/drishyam3d_logo.jpg'
 import { setupSettings } from '@engine/settings.js'
@@ -81,6 +82,7 @@ function formatCount(n) {
 function StatsOverlay({ stats }) {
   if (!stats) return null
   const isCpuRayTracing = stats.renderMode === 'raytrace-cpu'
+  const isGpuRayTracing = stats.renderMode === 'raytrace-gpu'
   return (
     <div style={{
       position: 'absolute',
@@ -100,6 +102,11 @@ function StatsOverlay({ stats }) {
         <>
           <div>CPU path tracing · {stats.spp || 0} spp</div>
           <div>{formatCount(stats.raysPerSecond || 0)} rays/s · {(stats.frameMs || 0).toFixed(1)}ms pass</div>
+        </>
+      ) : isGpuRayTracing ? (
+        <>
+          <div>GPU path tracing · {stats.spp || 0} spp</div>
+          <div>{stats.fps} fps ({stats.frameMs}ms)</div>
         </>
       ) : <div>{stats.fps} fps ({stats.frameMs}ms)</div>}
       <div>{stats.drawableKind}</div>
@@ -235,6 +242,7 @@ export default function App(){
             tileRenderWgsl,
             splatCullWgsl,
             splatRadixWgsl,
+            raytraceWgsl,
           }
         : { vertex: fileContents[defaultVertPath], fragment: fileContents[defaultFragPath] }
 
@@ -475,6 +483,23 @@ export default function App(){
       setError(null)
     } catch (err) {
       setError(`CPU Ray Tracing Error: ${err?.message || String(err)}`)
+    }
+  }
+
+  async function handleGpuCornellBox(e) {
+    e.preventDefault()
+    const coordinator = rayCoordinatorRef.current
+    if (!coordinator) return
+    try {
+      if (backend !== 'webgpu') throw new Error('Switch to WebGPU before starting GPU ray tracing.')
+      await coordinator.loadCornellBox('raytrace-gpu')
+      await coordinator.setRenderMode('raytrace-gpu')
+      setHasModelLoaded(true)
+      setSplatLoaded(false)
+      setCurrentShape(null)
+      setError(null)
+    } catch (err) {
+      setError(`GPU Ray Tracing Error: ${err?.message || String(err)}`)
     }
   }
 
@@ -818,6 +843,7 @@ export default function App(){
             <div className="menu-item" role="button" tabIndex="0" aria-label="Examples menu">Examples</div>
             <div className="dropdown-content">
               <a href="#" style={renderMode === 'raytrace-cpu' ? {fontWeight:'bold'} : {}} onClick={handleCornellBox}>Cornell Box · CPU</a>
+              <a href="#" className={backend !== 'webgpu' ? 'disabled' : ''} style={renderMode === 'raytrace-gpu' ? {fontWeight:'bold'} : {}} onClick={handleGpuCornellBox}>Cornell Box · GPU</a>
             </div>
           </div>
 
@@ -847,6 +873,7 @@ export default function App(){
               <div className="menu-separator"></div>
               <div className="menu-label" style={{padding:'4px 12px',opacity:0.6,fontSize:'0.8em',userSelect:'none'}}>Ray Tracing</div>
               <a href="#" style={renderMode === 'raytrace-cpu' ? {fontWeight:'bold'} : {}} onClick={handleCornellBox}>CPU · Cornell Box</a>
+              <a href="#" className={backend !== 'webgpu' ? 'disabled' : ''} style={renderMode === 'raytrace-gpu' ? {fontWeight:'bold'} : {}} onClick={handleGpuCornellBox}>GPU · Cornell Box</a>
               {splatLoaded && (
                 <>
                   <div className="menu-separator"></div>

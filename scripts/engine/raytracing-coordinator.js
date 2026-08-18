@@ -6,14 +6,20 @@ export function createRayTracingCoordinator({ cpuCanvas, cpuFactory, onModeChang
     let cpuPromise = null;
     let mode = 'raster';
     let destroyed = false;
-    let cornellLoaded = false;
+    let cpuCornellLoaded = false;
+    let gpuCornellLoaded = false;
 
     function capabilities() {
+        const rasterCapabilities = rasterEngine?.getCapabilities?.() || {};
         return {
             raster: { available: !!rasterEngine },
             'raytrace-cpu': {
                 available: typeof Worker !== 'undefined' && !!cpuCanvas.getContext,
                 reason: typeof Worker === 'undefined' ? 'Web Workers are unavailable.' : undefined,
+            },
+            'raytrace-gpu': rasterCapabilities['raytrace-gpu'] || {
+                available: false,
+                reason: rasterEngine ? 'The active raster backend does not support GPU ray tracing.' : 'No raster engine is active.',
             },
         };
     }
@@ -40,16 +46,28 @@ export function createRayTracingCoordinator({ cpuCanvas, cpuFactory, onModeChang
         getCapabilities: capabilities,
         setRasterEngine(engine) {
             rasterEngine = engine;
+            gpuCornellLoaded = false;
             if (mode === 'raytrace-cpu') rasterEngine?.scene?.pause?.();
         },
-        async loadCornellBox() {
+        async loadCornellBox(targetMode = 'raytrace-cpu') {
+            if (targetMode === 'raytrace-gpu') {
+                const gpuCapabilities = capabilities()['raytrace-gpu'];
+                if (!gpuCapabilities.available || !rasterEngine?.loadCornellBox) {
+                    const error = new Error(gpuCapabilities.reason || 'GPU Cornell Box is unavailable.');
+                    error.code = 'UNSUPPORTED_RENDER_MODE';
+                    throw error;
+                }
+                const scene = await rasterEngine.loadCornellBox();
+                gpuCornellLoaded = true;
+                return scene;
+            }
             const cpu = await ensureCpuEngine();
             const scene = cpu.loadCornellBox();
-            cornellLoaded = true;
+            cpuCornellLoaded = true;
             return scene;
         },
         async setRenderMode(nextMode) {
-            if (nextMode !== 'raster' && nextMode !== 'raytrace-cpu') {
+            if (nextMode !== 'raster' && nextMode !== 'raytrace-cpu' && nextMode !== 'raytrace-gpu') {
                 const error = new Error(`Unsupported render mode: ${nextMode}`);
                 error.code = 'UNSUPPORTED_RENDER_MODE';
                 throw error;
@@ -63,24 +81,42 @@ export function createRayTracingCoordinator({ cpuCanvas, cpuFactory, onModeChang
                     throw error;
                 }
                 const cpu = await ensureCpuEngine();
-                if (!cornellLoaded) {
+                if (!cpuCornellLoaded) {
                     cpu.loadCornellBox();
-                    cornellLoaded = true;
+                    cpuCornellLoaded = true;
                 }
+                if (mode === 'raytrace-gpu') await rasterEngine?.setRenderMode?.('raster');
                 rasterEngine?.scene?.pause?.();
                 cpu.resume();
+            } else if (nextMode === 'raytrace-gpu') {
+                const gpuCapabilities = capabilities()['raytrace-gpu'];
+                if (!gpuCapabilities.available) {
+                    const error = new Error(gpuCapabilities.reason);
+                    error.code = 'UNSUPPORTED_RENDER_MODE';
+                    throw error;
+                }
+                if (!gpuCornellLoaded) {
+                    await rasterEngine.loadCornellBox();
+                    gpuCornellLoaded = true;
+                }
+                cpuEngine?.pause?.();
+                rasterEngine?.scene?.resume?.();
+                await rasterEngine.setRenderMode('raytrace-gpu');
             } else {
                 cpuEngine?.pause?.();
+                if (mode === 'raytrace-gpu') await rasterEngine?.setRenderMode?.('raster');
                 rasterEngine?.scene?.resume?.();
             }
             mode = nextMode;
             onModeChange?.(mode);
         },
         setRayTracingSettings(partial) {
-            cpuEngine?.setSettings?.(partial);
+            if (mode === 'raytrace-gpu') rasterEngine?.setRayTracingSettings?.(partial);
+            else cpuEngine?.setSettings?.(partial);
         },
         resetAccumulation() {
-            cpuEngine?.resetAccumulation?.();
+            if (mode === 'raytrace-gpu') rasterEngine?.resetAccumulation?.();
+            else cpuEngine?.resetAccumulation?.();
         },
         resize() {
             cpuEngine?.resize?.();
