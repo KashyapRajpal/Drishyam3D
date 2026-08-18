@@ -5,8 +5,8 @@ splat-ordering algorithms at runtime and score them head-to-head — a "sort sho
 the three-axis architecture, the backends on each axis, the measurement harness, the milestone
 sequencing, and the resolved design decisions.
 
-> **Status:** milestones **A** and **B** are implemented (the `SortBackend`/`ReductionStage`
-> modules, `Bitonic` + `None` + `Culled`, the matrix UI, GPU timing). C (radix), D (coarse), and E
+> **Status:** milestones **A**, **B** and **C** are implemented (the `SortBackend`/`ReductionStage`
+> modules, `Bitonic` + `Radix` + `None` + `Culled`, the matrix UI, GPU timing). D (coarse) and E
 > (LOD) remain planned. See [Milestone sequencing](#milestone-sequencing) for what's live.
 
 Companion to **[splat-rendering.md](splat-rendering.md)**, which documents the *current*
@@ -216,7 +216,7 @@ so any matrix cell is one click away and the current configuration is always vis
 
 ```
 ┌─ Splat Ordering ───────────────────────────┐
-│ Sort:      (•) Bitonic   ( ) Radix          │
+│ Sort:      (•) Bitonic   ( ) Radix          │   ← both live
 │ Reduction: (•) None  ( ) Culled  ( ) Coarse │
 │            ( ) LOD                          │
 │ Render:    (•) Instanced   ( ) Tiled        │
@@ -241,7 +241,7 @@ Stats overlay: … + "sort: X.X ms"
 |---|---|---|---|
 | **A** ✅ | `ReductionStage`/`SortBackend` interfaces + `None` + `Bitonic` (refactor current) + matrix UI | None×Bitonic | low — pure refactor, must match today |
 | **B** ✅ | `Culled` frustum cull + indirect draw + GPU-timestamp reduce/sort timing; octree built + measured → **grid wins** (see Resolved decision 4) | + Culled×Bitonic | done — grid cull ~0.066 ms, exact |
-| **C** | `Radix` — reuse tile radix shader (the real target: sort ~0.92 ms dominates) | + ×Radix column | med — shared with tile step 4 |
+| **C** ✅ | `Radix` — 4×8-bit LSD, exact, ~13 dispatches, no pow2 padding | + ×Radix column | done — 12–17× faster than bitonic, pixel-identical |
 | **D** | `Coarse` + vs-oracle quality readout | + Coarse×* | med — approximate; popping to tune |
 | **E** | `LOD` — merged-Gaussian hierarchy | + LOD×* | high — own track, weeks |
 
@@ -261,10 +261,11 @@ scripts/engine/ordering/
   lod-reduction.js         NEW  (E) hierarchy cut
   sort-backend.js          NEW  axis-2 base class / contract
   bitonic-backend.js       NEW  wraps existing compute_keys + bitonic_step
-  radix-backend.js         NEW  (C) shared radix shader
+  radix-backend.js         ✅   (C) 4×8-bit LSD radix backend
   spatial/grid.js          NEW  (B) build-at-load uniform/Morton grid over centers
   spatial/octree.js        NEW  (B) build-at-load loose octree over centers
 assets/shaders/
+  splat-radix-sort.wgsl    ✅   (C) encode + histogram/scan/scatter
   splat-cull.wgsl          NEW  (B) frustum test + compaction + indirect args
   splat-coarse.wgsl        NEW  (D) cell depth + key composition
 ```

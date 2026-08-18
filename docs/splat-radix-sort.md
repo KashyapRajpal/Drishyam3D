@@ -4,9 +4,46 @@ Implementation plan for the **Radix** cell of the Sort axis in
 [splat-ordering.md](splat-ordering.md). That doc designs the three-axis matrix and resolves the
 architecture; this one is the build order for the single milestone that matters most right now.
 
-> **Status:** in progress. **C0** (benchmark ladder) and **C3** (CPU reference + tests) are done;
-> C1/C2/C4/C5 remain. Milestones A and B are shipped (`SortBackend`/`ReductionStage`, `None` +
-> `Culled`, `Bitonic`, GPU-timestamp timing, matrix UI).
+> **Status:** **shipped.** C0–C5 are done: radix is selectable in the matrix, exact against the
+> bitonic oracle, and **12–17× faster on the sort** (see [Results](#results)). Milestones A and B
+> were shipped earlier (`SortBackend`/`ReductionStage`, `None` + `Culled`, `Bitonic`,
+> GPU-timestamp timing, matrix UI).
+
+## Results
+
+Measured on the cluster-fly ladder, scenes normalized to origin/radius-1, `None` reduction,
+900×700, medians over alternating A/B rounds after warm-up:
+
+| scene | bitonic sort | radix sort | speedup | render pass | fps (bitonic → radix) |
+|---|---:|---:|---:|---:|---:|
+| fly M (145,617) | 18.9 ms | **1.11 ms** | **17×** | 7.4 ms | 9 → 17 |
+| fly L (301,958) | 30.0 ms | **2.49 ms** | **12×** | 15.1 ms | ~7 → ~10 |
+
+Radix scales linearly — 1.11 → 2.49 ms for 2.07× the splats — which is the O(N) behaviour the
+design predicts. Bitonic's 18.9 → 30.0 ms is sub-linear only because of where the `nextPow2`
+padding happens to land between those two counts.
+
+Exactness held everywhere it was checked: **0 px differ** against bitonic on M and L, under both
+`None` and `Culled`.
+
+> **Three measurement traps, all of which produced wrong numbers before being caught.** Recorded
+> because every one of them looked plausible at the time:
+> 1. **Invalid pipelines render nothing, silently.** A WGSL parse error surfaces as a console
+>    *warning*, and `createComputePipeline` still returns a non-null object — so guards pass, the
+>    command buffer is rejected, and the canvas keeps its last good frame. It reads as "fast and
+>    correct" (high fps, small pixel diff) rather than as a failure. Always prove liveness by
+>    perturbing the camera, and capture console *warnings*, not just errors.
+> 2. **`GpuTimer` readback is single-flight and returns the last successful sample.** Measure too
+>    soon after load and you get cold-start frames; whichever backend is measured first inherits
+>    them. This produced both a fake 15× win and a fake pathological blowup. Warm up, alternate
+>    A/B/A/B, take medians over a wide window.
+> 3. **`fps` is the rAF callback rate and `frameMs` is CPU encode time only** — neither measures GPU
+>    frame cost. Corroborate with timestamp spans.
+
+> **Still unaccounted:** at L, `sort + render` ≈ 18 ms against a ~95 ms frame. The gap is not
+> explained by the timed passes and is worth chasing before any further sort tuning — candidates
+> are the untimed `compute_keys` pass, CPU-side per-frame work, and browser/compositor overhead in
+> the headed harness.
 
 ---
 
@@ -220,7 +257,7 @@ Two findings worth carrying into C1:
 
 ---
 
-## C4 — Wire the Sort axis
+## C4 — Wire the Sort axis ✅
 
 Currently the reduction axis is switchable but the sort axis is hardcoded
 ([splat-renderer.js:49](../scripts/engine/renderers/splat-renderer.js#L49)) and Radix is greyed out
@@ -237,7 +274,7 @@ path:
 
 ---
 
-## C5 — Verify, then record
+## C5 — Verify, then record ✅
 
 **Correctness.** Radix is exact, so the gate is pixel equality against the oracle. Add `*-radix`
 mirrors of the existing cases to [visual/cases.mjs](../visual/cases.mjs) — the file already carries
@@ -270,8 +307,8 @@ outcome.
 ```
 scripts/engine/ordering/radix-reference.js       ✅   (C3) plain-JS oracle the WGSL mirrors
 __tests__/radix-sort.test.js                     ✅   (C3) 22 tests over the oracle
-assets/shaders/splat-radix-sort.wgsl             NEW  (C1) encode + histogram/scan/scatter
-scripts/engine/ordering/radix-backend.js         NEW  (C2) SortBackend impl
+assets/shaders/splat-radix-sort.wgsl             ✅   (C1) encode + histogram/scan/scatter
+scripts/engine/ordering/radix-backend.js         ✅   (C2) SortBackend impl
 ```
 
 C0 needed no new code — the ladder was already in `assets/3dgs/cluster-fly.zip`, now extracted to
