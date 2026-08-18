@@ -70,36 +70,85 @@ export function uploadGltfWebGL(gl, asset) {
 }
 
 export function uploadGltfWebGPU(device, asset) {
-    let indices = asset.indices;
-    if (!(indices instanceof Uint16Array) && !(indices instanceof Uint32Array)) {
-        indices = new Uint16Array(indices);
-    }
-    const indexFormat = indices instanceof Uint32Array ? 'uint32' : 'uint16';
-    const indexCount = indices.length;
-    let uploadIndices = indices;
-    if (indices.byteLength % 4 !== 0) {
-        uploadIndices = new Uint16Array(indices.length + 1);
-        uploadIndices.set(indices);
-    }
-    const texCoords = asset.texCoords || new Float32Array((asset.positions.length / 3) * 2);
+    const sourcePrimitives = asset.rasterPrimitives?.length ? asset.rasterPrimitives : [{
+        positions: asset.positions,
+        normals: asset.normals,
+        texCoords: asset.texCoords,
+        indices: asset.indices,
+        textureBitmap: asset.textureBitmap,
+        material: asset.material,
+        worldMatrix: null,
+    }];
+    const geometryResources = new Map();
+    const textureResources = new Map();
+    const primitives = sourcePrimitives.map((primitive, instanceIndex) => {
+        const geometryKey = Number.isInteger(primitive.sourceMeshIndex)
+            ? `${primitive.sourceMeshIndex}:${primitive.sourcePrimitiveIndex}`
+            : primitive;
+        let geometry = geometryResources.get(geometryKey);
+        if (!geometry) {
+            let indices = primitive.indices;
+            if (!(indices instanceof Uint16Array) && !(indices instanceof Uint32Array)) {
+                indices = new Uint16Array(indices);
+            }
+            const indexFormat = indices instanceof Uint32Array ? 'uint32' : 'uint16';
+            let uploadIndices = indices;
+            if (indices.byteLength % 4 !== 0) {
+                uploadIndices = new Uint16Array(indices.length + 1);
+                uploadIndices.set(indices);
+            }
+            const texCoords = primitive.texCoords
+                || new Float32Array((primitive.positions.length / 3) * 2);
+            geometry = {
+                buffers: {
+                    position: createVertexBuffer(device, primitive.positions),
+                    normal: createVertexBuffer(device, primitive.normals),
+                    texCoord: createVertexBuffer(device, texCoords),
+                    indices: createIndexBuffer(device, uploadIndices),
+                },
+                indexCount: indices.length,
+                indexFormat,
+            };
+            geometryResources.set(geometryKey, geometry);
+        }
+        let texture = null;
+        if (primitive.textureBitmap) {
+            texture = textureResources.get(primitive.textureBitmap);
+            if (!texture) {
+                texture = createTextureFromImageBitmap(device, primitive.textureBitmap);
+                textureResources.set(primitive.textureBitmap, texture);
+            }
+        }
+        return {
+            ...geometry,
+            texture,
+            material: primitive.material || asset.material,
+            worldMatrix: primitive.worldMatrix,
+            instanceIndex,
+        };
+    });
+    const first = primitives[0];
     return {
         kind: 'mesh',
-        buffers: {
-            position: createVertexBuffer(device, asset.positions),
-            normal: createVertexBuffer(device, asset.normals),
-            texCoord: createVertexBuffer(device, texCoords),
-            indices: createIndexBuffer(device, uploadIndices),
-        },
-        texture: asset.textureBitmap ? createTextureFromImageBitmap(device, asset.textureBitmap) : null,
-        vertexCount: indexCount,
-        indexFormat,
+        primitives,
+        buffers: first?.buffers,
+        texture: first?.texture ?? null,
+        material: first?.material,
+        vertexCount: primitives.reduce((sum, primitive) => sum + primitive.indexCount, 0),
+        indexFormat: first?.indexFormat ?? 'uint16',
         bounds: asset.bounds,
-        rayTracing: { asset, preparedRayScene: asset.rayScene },
+        rayTracing: {
+            asset,
+            preparedRayScene: asset.rayScene,
+            geometryRevision: asset.revisions?.geometryRevision ?? 0,
+            instanceRevision: asset.revisions?.instanceRevision ?? 0,
+        },
         _debug: {
             name: asset.sourceName,
-            positionElementCount: asset.positions.length,
-            normalElementCount: asset.normals.length,
-            indexElementCount: indexCount,
+            primitiveCount: primitives.length,
+            positionElementCount: sourcePrimitives.reduce((sum, primitive) => sum + primitive.positions.length, 0),
+            normalElementCount: sourcePrimitives.reduce((sum, primitive) => sum + primitive.normals.length, 0),
+            indexElementCount: primitives.reduce((sum, primitive) => sum + primitive.indexCount, 0),
         },
     };
 }

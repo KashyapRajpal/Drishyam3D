@@ -386,6 +386,21 @@ describe('glTF parser/data split', () => {
     expect(validateRayScene(drawable.rayTracing.preparedRayScene).ok).toBe(true);
   });
 
+  test('uploads every raster instance while sharing repeated primitive GPU buffers', async () => {
+    const device = webgpu();
+    const drawable = await parseGltfForBackend({ device }, instancedSceneFiles());
+    expect(drawable.primitives).toHaveLength(4);
+    expect(drawable.vertexCount).toBe(12);
+    expect(drawable.primitives[0].buffers).toBe(drawable.primitives[2].buffers);
+    expect(drawable.primitives[1].buffers).toBe(drawable.primitives[3].buffers);
+    expect(drawable.primitives[0].buffers).not.toBe(drawable.primitives[1].buffers);
+    expect(drawable.primitives.map((primitive) => primitive.material.baseColor)).toEqual([
+      [1, 0, 0, 1], [0, 0, 1, 1], [1, 0, 0, 1], [0, 0, 1, 1],
+    ]);
+    expect(device.createBuffer).toHaveBeenCalledTimes(8); // Two local geometries, four buffers each.
+    expect(drawable.rayTracing).toMatchObject({ geometryRevision: 0, instanceRevision: 0 });
+  });
+
   test('rejects an engine without a supported upload context after parsing', async () => {
     await expect(parseGltfForBackend({}, singleTriangleFiles())).rejects.toThrow(/Unsupported engine context/);
   });
