@@ -5,6 +5,8 @@ import 'codemirror/theme/dracula.css'
 import 'codemirror/mode/javascript/javascript'
 import 'codemirror/mode/clike/clike'
 import { initEngine } from '@engine/app-facade.js'
+import { initCpuRayEngine } from '@engine/cpu-ray-facade.js'
+import { createRayTracingCoordinator } from '@engine/raytracing-coordinator.js'
 import { createDefaultCube, createDefaultTexturedCube, createSphere, createTexturedSphere } from '@engine/geometry.js'
 import { createWebGPUGeometryFactory } from '@engine/webgpu-facade.js'
 import checkerboardTextureUrl from '@assets/checkerboard-texture.png'
@@ -27,6 +29,7 @@ import {
   loadAssetFiles,
   loadAssetFromDirectory,
 } from '@engine/scene-ops.js'
+import { ViewportCanvases } from './components/ViewportCanvases.jsx'
 
 const shaderFiles = import.meta.glob('../../assets/shaders/**/*.{vert,frag,glsl,wgsl}', { query: '?raw', import: 'default' })
 const engineFiles = import.meta.glob('../../scripts/engine/**/*.js', { query: '?raw', import: 'default' })
@@ -77,6 +80,7 @@ function formatCount(n) {
 
 function StatsOverlay({ stats }) {
   if (!stats) return null
+  const isCpuRayTracing = stats.renderMode === 'raytrace-cpu'
   return (
     <div style={{
       position: 'absolute',
@@ -92,7 +96,12 @@ function StatsOverlay({ stats }) {
       pointerEvents: 'none',
       zIndex: 1000,
     }}>
-      <div>{stats.fps} fps ({stats.frameMs}ms)</div>
+      {isCpuRayTracing ? (
+        <>
+          <div>CPU path tracing · {stats.spp || 0} spp</div>
+          <div>{formatCount(stats.raysPerSecond || 0)} rays/s · {(stats.frameMs || 0).toFixed(1)}ms pass</div>
+        </>
+      ) : <div>{stats.fps} fps ({stats.frameMs}ms)</div>}
       <div>{stats.drawableKind}</div>
       {stats.triangleCount > 0 && <div>{formatCount(stats.triangleCount)} tris</div>}
       {stats.splatCount > 0 && <div>{formatCount(stats.splatCount)} splats</div>}
@@ -169,6 +178,7 @@ export default function App(){
   // Visual-regression harness loads with ?test=1 and drives WebGPU splats directly.
   const isVisualTest = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('test')
   const [backend, setBackend] = useState(isVisualTest ? 'webgpu' : 'webgl')
+  const [renderMode, setRenderMode] = useState('raster')
   const [error, setError] = useState(null)
   const [textured, setTextured] = useState(false)
   const [currentShape, setCurrentShape] = useState('cube')
@@ -184,9 +194,30 @@ export default function App(){
   const [stats, setStats] = useState(null)
   const [engineReady, setEngineReady] = useState(0)
   const canvasRef = useRef(null)
+  const cpuCanvasRef = useRef(null)
   const engineRef = useRef(null)
+  const rayCoordinatorRef = useRef(null)
   const geometryFactoryRef = useRef(null)
   const pickerActiveRef = useRef(false)
+
+  useEffect(() => {
+    if (!cpuCanvasRef.current) return
+    const coordinator = createRayTracingCoordinator({
+      cpuCanvas: cpuCanvasRef.current,
+      cpuFactory: initCpuRayEngine,
+      onModeChange: setRenderMode,
+      onError: (err) => setError(err?.message || String(err)),
+    })
+    rayCoordinatorRef.current = coordinator
+    if (engineRef.current) coordinator.setRasterEngine(engineRef.current)
+    const handleResize = () => coordinator.resize()
+    window.addEventListener('resize', handleResize)
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      coordinator.destroy()
+      if (rayCoordinatorRef.current === coordinator) rayCoordinatorRef.current = null
+    }
+  }, [])
 
   useEffect(()=>{
     let cancelled = false
@@ -223,6 +254,7 @@ export default function App(){
         return
       }
       engineRef.current = engine
+      rayCoordinatorRef.current?.setRasterEngine(engine)
 
       // Expose the engine for the visual-regression harness (?test=1 only).
       if (isVisualTest) window.__DRISHYAM_ENGINE = engine
@@ -250,6 +282,7 @@ export default function App(){
         }
         engineRef.current = null
       }
+      rayCoordinatorRef.current?.setRasterEngine(null)
       geometryFactoryRef.current = null
     }
   }, [backend])
@@ -326,14 +359,14 @@ export default function App(){
   // Poll stats when visible.
   useEffect(() => {
     if (!showStats || !engineReady) return
-    const engine = engineRef.current
+    const engine = renderMode === 'raytrace-cpu' ? rayCoordinatorRef.current : engineRef.current
     const timer = setInterval(() => {
       if (engine && typeof engine.getStats === 'function') {
         setStats(engine.getStats())
       }
     }, 200)
     return () => clearInterval(timer)
-  }, [showStats, engineReady])
+  }, [showStats, engineReady, renderMode])
 
   // Drive the current shape from React state. Reacts to shape/textured/engine changes.
   useEffect(() => {
@@ -354,6 +387,7 @@ export default function App(){
     const engine = engineRef.current
     if (!engine) return
     try {
+      await rayCoordinatorRef.current?.setRenderMode('raster')
       await loadSampleGltf({ engine })
       setHasModelLoaded(true)
       setError(null)
@@ -374,6 +408,7 @@ export default function App(){
     pickerActiveRef.current = true
     window.__DRISHYAM_PICKER_ACTIVE = true
     try {
+      await rayCoordinatorRef.current?.setRenderMode('raster')
       let kind
       if (window.showDirectoryPicker) {
         const dirHandle = await window.showDirectoryPicker()
@@ -408,6 +443,7 @@ export default function App(){
     const geometryFactory = geometryFactoryRef.current
     if (!engine || !geometryFactory) return
     try {
+      await rayCoordinatorRef.current?.setRenderMode('raster')
       await resetSceneOp({ engine, geometryFactory })
       setHasModelLoaded(false)
       setCurrentShape('cube')
@@ -424,6 +460,33 @@ export default function App(){
     e.preventDefault()
     if (hasModelLoaded) return
     setCurrentShape(shape)
+  }
+
+  async function handleCornellBox(e) {
+    e.preventDefault()
+    const coordinator = rayCoordinatorRef.current
+    if (!coordinator) return
+    try {
+      await coordinator.loadCornellBox()
+      await coordinator.setRenderMode('raytrace-cpu')
+      setHasModelLoaded(true)
+      setSplatLoaded(false)
+      setCurrentShape(null)
+      setError(null)
+    } catch (err) {
+      setError(`CPU Ray Tracing Error: ${err?.message || String(err)}`)
+    }
+  }
+
+  async function selectRasterBackend(e, nextBackend) {
+    e.preventDefault()
+    try {
+      await rayCoordinatorRef.current?.setRenderMode('raster')
+      setBackend(nextBackend)
+      setError(null)
+    } catch (err) {
+      setError(err?.message || String(err))
+    }
   }
 
   // Handlers to apply edits
@@ -751,6 +814,13 @@ export default function App(){
             </div>
           </div>
 
+          <div id="examples-menu-container" className="menu-container">
+            <div className="menu-item" role="button" tabIndex="0" aria-label="Examples menu">Examples</div>
+            <div className="dropdown-content">
+              <a href="#" style={renderMode === 'raytrace-cpu' ? {fontWeight:'bold'} : {}} onClick={handleCornellBox}>Cornell Box · CPU</a>
+            </div>
+          </div>
+
           <div id="shapes-menu-container" className={`menu-container ${hasModelLoaded ? 'disabled' : ''}`}>
             <div className="menu-item" role="button" tabIndex="0" aria-label="Shapes menu">Shapes</div>
             <div className="dropdown-content">
@@ -771,9 +841,12 @@ export default function App(){
           <div id="settings-menu-container" className="menu-container">
             <div className="menu-item" role="button" tabIndex="0" aria-label="Settings menu">Settings</div>
             <div className="dropdown-content">
-              <div className="menu-label" style={{padding:'4px 12px',opacity:0.6,fontSize:'0.8em',userSelect:'none'}}>Renderer</div>
-              <a href="#" style={backend === 'webgl' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setBackend('webgl') }}>WebGL</a>
-              <a href="#" style={backend === 'webgpu' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setBackend('webgpu') }}>WebGPU</a>
+              <div className="menu-label" style={{padding:'4px 12px',opacity:0.6,fontSize:'0.8em',userSelect:'none'}}>Raster Backend</div>
+              <a href="#" style={backend === 'webgl' && renderMode === 'raster' ? {fontWeight:'bold'} : {}} onClick={(e) => selectRasterBackend(e, 'webgl')}>WebGL</a>
+              <a href="#" style={backend === 'webgpu' && renderMode === 'raster' ? {fontWeight:'bold'} : {}} onClick={(e) => selectRasterBackend(e, 'webgpu')}>WebGPU</a>
+              <div className="menu-separator"></div>
+              <div className="menu-label" style={{padding:'4px 12px',opacity:0.6,fontSize:'0.8em',userSelect:'none'}}>Ray Tracing</div>
+              <a href="#" style={renderMode === 'raytrace-cpu' ? {fontWeight:'bold'} : {}} onClick={handleCornellBox}>CPU · Cornell Box</a>
               {splatLoaded && (
                 <>
                   <div className="menu-separator"></div>
@@ -866,11 +939,10 @@ export default function App(){
         </aside>
 
         <section className="center-panel">
-          <div className="viewport-canvas-wrap" style={{position:'relative'}}>
-            <canvas key={backend} ref={canvasRef} className="viewport-canvas" id="glcanvas" aria-label="3D scene viewport" />
+          <ViewportCanvases rasterCanvasRef={canvasRef} cpuCanvasRef={cpuCanvasRef} rasterKey={backend} renderMode={renderMode}>
             <StatsOverlay stats={showStats ? stats : null} />
             <input type="file" id="model-file-input" style={{display:'none'}} accept=".zip,.gltf" multiple />
-          </div>
+          </ViewportCanvases>
         </section>
 
         <aside className="right-panel">
