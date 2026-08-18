@@ -59,7 +59,9 @@ describe('GPU ray resource helpers', () => {
       UNIFORM: 0x0040,
       STORAGE: 0x0080,
     };
-    global.GPUTextureUsage = { TEXTURE_BINDING: 0x04, STORAGE_BINDING: 0x08, RENDER_ATTACHMENT: 0x10 };
+    global.GPUTextureUsage = {
+      COPY_SRC: 0x01, TEXTURE_BINDING: 0x04, STORAGE_BINDING: 0x08, RENDER_ATTACHMENT: 0x10,
+    };
     global.GPUShaderStage = { FRAGMENT: 0x02, COMPUTE: 0x04 };
   });
 
@@ -126,6 +128,7 @@ describe('GPU ray resource helpers', () => {
     const first = createAccumulationTargets(device, 320, 200);
     expect(first.textures[0].desc).toMatchObject({ size: [320, 200, 1], format: ACCUMULATION_FORMAT });
     expect(first.textures[0].desc.usage & GPUTextureUsage.STORAGE_BINDING).toBeTruthy();
+    expect(first.textures[0].desc.usage & GPUTextureUsage.COPY_SRC).toBeTruthy();
     expect(getAccumulationPair(first)).toMatchObject({ readIndex: 0, writeIndex: 1 });
     expect(advanceAccumulationTargets(first)).toBe(1);
 

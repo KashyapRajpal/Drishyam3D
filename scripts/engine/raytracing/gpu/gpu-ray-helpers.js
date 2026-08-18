@@ -187,7 +187,8 @@ export function createAccumulationTargets(device, width, height, format = ACCUMU
                 format,
                 usage: GPUTextureUsage.TEXTURE_BINDING
                     | GPUTextureUsage.STORAGE_BINDING
-                    | GPUTextureUsage.RENDER_ATTACHMENT,
+                    | GPUTextureUsage.RENDER_ATTACHMENT
+                    | GPUTextureUsage.COPY_SRC,
             }));
         }
     } catch (error) {

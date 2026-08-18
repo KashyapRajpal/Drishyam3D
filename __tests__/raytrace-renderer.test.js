@@ -87,7 +87,9 @@ describe('RayTraceRenderer', () => {
     global.GPUBufferUsage = {
       MAP_READ: 0x0001, COPY_SRC: 0x0004, COPY_DST: 0x0008, UNIFORM: 0x0040, STORAGE: 0x0080,
     };
-    global.GPUTextureUsage = { TEXTURE_BINDING: 0x04, STORAGE_BINDING: 0x08, RENDER_ATTACHMENT: 0x10 };
+    global.GPUTextureUsage = {
+      COPY_SRC: 0x01, TEXTURE_BINDING: 0x04, STORAGE_BINDING: 0x08, RENDER_ATTACHMENT: 0x10,
+    };
     global.GPUShaderStage = { FRAGMENT: 0x02, COMPUTE: 0x04 };
   });
 
