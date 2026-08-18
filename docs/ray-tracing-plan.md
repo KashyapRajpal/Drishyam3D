@@ -1451,24 +1451,26 @@ Implementation status:
 | RT-014 | Complete | `0cb68c9`; facade/registry tests, BLAS reuse/TLAS-prefix uploads, full Jest suite, and UI build |
 | RT-015 | Complete | `1a4273c`, `a356d9b`; G-buffer/composite lifecycle and registry tests, full Jest suite, UI build, and Chrome validation |
 | RT-015A | Complete | `979e7bd`, `c0a11e6`; three-pass/BLAS-reuse tests, 40-suite/293-test Jest gate, UI build, and Chrome glTF hard-shadow validation |
-| RT-016 | In progress | `c310f73`, `10d9c4d`; Cornell CPU facade/coordinator complete; retained glTF RayScene handoff remains |
+| RT-016 | Complete | `c310f73`, `10d9c4d`, `1c4f555`; retained Cornell/glTF handoff, cross-mode camera state, lifecycle/asset ownership tests, full Jest suite |
 | RT-016A | Complete | `afa4616`; UI build plus Chrome CPU↔raster smoke test with separate canvases |
-| RT-017 | In progress | `afa4616`, `2bd7fba`; CPU/GPU Cornell examples and stats exposed; hybrid controls remain |
+| RT-017 | In progress | `afa4616`, `2bd7fba`, `f506eee`, `fa6adb2`; all four modes, pause/reset, capability reasons, and hybrid timings exposed; sampling/light controls remain |
 | RT-018 | Not started | — |
 
 Split this row as packets begin. Use only `Not started`, `In progress`, `Blocked`, or
 `Complete`; link the completing commit/PR and name the verification commands in Evidence.
 
-Hybrid glTF shadow checkpoint (2026-08-18): Chrome `151.0.7922.138` on macOS rendered
-the deterministic `ShadowReceiversAndCasters` glTF fixture through the supported local
-`.gltf` + `.bin` asset path. The `316 x 644` canvas contained three raster primitives and
-three matched RayScene instances: a floor receiver plus red and blue box casters under a
-directional light. Both boxes produced stable hard cast/contact shadows. Browser capture
-reported no page/console errors and the WebGPU validation scope returned no error; sampled
-GPU timings were approximately `0.07 ms` G-buffer, `0.39 ms` shadow, and `0.13 ms`
-composite. Attach `/tmp/drishyam-gltf-hybrid-shadows.png` to the PR rather than committing
-it. The production UI build and all `40` Jest suites (`293` tests) passed at this
-checkpoint.
+Hybrid glTF shadow checkpoint (2026-08-18): Chrome `151.0.7922.138` on macOS loaded the
+deterministic `ShadowReceiversAndCasters` fixture through the production file picker and
+supported local `.gltf` + `.bin` path, selected `Hybrid ray-traced shadows` through the
+modular Settings control, enabled stats, and paused rendering. The `540 x 708` viewport
+contained three raster primitives and three matched RayScene instances: a floor receiver
+plus red and blue box casters under a directional light. Both boxes produced stable hard
+cast/contact shadows. Browser capture reported no error banner, page/console errors, or
+WebGPU validation error; sampled GPU timings were approximately `0.13 ms` G-buffer,
+`0.66 ms` shadow, and `0.20 ms` composite. Attach
+`/tmp/drishyam-gltf-hybrid-ui.png` and `/tmp/drishyam-gltf-hybrid-controls.png` to the PR
+rather than committing them. The production UI build and all `40` Jest suites (`295`
+tests) passed at this checkpoint.
 
 GPU Cornell visual checkpoint (2026-08-18): Chrome `151.0.7922.138` on macOS with an
 AMD Radeon Pro 5500M/Intel UHD 630 system rendered the `916 x 824` canvas at `64` SPP,
