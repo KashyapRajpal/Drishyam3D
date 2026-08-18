@@ -102,10 +102,19 @@ function StatsOverlay({ stats }) {
         </div>
       )}
       {stats.passMs?.reduce != null && <div style={{ color: '#fc6' }}>reduce {stats.passMs.reduce.toFixed(2)}ms</div>}
-      {stats.passMs?.sort != null && (
-        <div style={{ color: '#fc6' }}>sort ({stats.sortMode}) {stats.passMs.sort.toFixed(2)}ms</div>
+      {/* GpuTimer withholds stale readings, so a missing value means "no recent
+          sample" — show a dash rather than dropping the line, which would read as
+          "this pass stopped running". */}
+      {stats.splatCount > 0 && (
+        <div style={{ color: '#fc6' }}>
+          sort ({stats.sortMode}) {stats.passMs?.sort != null ? `${stats.passMs.sort.toFixed(2)}ms` : '—'}
+        </div>
       )}
-      {stats.passMs?.render != null && <div style={{ color: '#fc6' }}>render {stats.passMs.render.toFixed(2)}ms</div>}
+      {stats.splatCount > 0 && (
+        <div style={{ color: '#fc6' }}>
+          render {stats.passMs?.render != null ? `${stats.passMs.render.toFixed(2)}ms` : '—'}
+        </div>
+      )}
     </div>
   )
 }
