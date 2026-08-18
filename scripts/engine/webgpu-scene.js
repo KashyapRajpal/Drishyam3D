@@ -243,6 +243,57 @@ export function createWebGPUScene(device, context, format, canvas, camera) {
             forceUpdate();
         },
 
+        /**
+         * Measures end-to-end GPU cost per frame by rendering frames back to back
+         * and awaiting `queue.onSubmittedWorkDone()` after each.
+         *
+         * This exists because neither existing signal is trustworthy at scale:
+         * `fps` is the rAF callback rate (the GPU queues behind it, so it reads
+         * ~60 while frames take a second), `frameMs` is CPU encode time only, and
+         * timestamp readbacks stop landing entirely on very heavy scenes — a
+         * 3.5M-splat cloud yields zero samples. Waiting on submitted work
+         * measures the thing itself and degrades gracefully instead.
+         *
+         * The rAF loop is paused for the duration so measured frames don't
+         * interleave with scheduled ones.
+         *
+         * @param {{frames?: number, warmup?: number}} [opts]
+         * @returns {Promise<{frames:number, medianMs:number, meanMs:number, minMs:number, maxMs:number}|null>}
+         */
+        async measureFrameCost({ frames = 20, warmup = 3 } = {}) {
+            if (!drawable || !rendererFor(drawable)) return null;
+            const wasActive = active;
+            active = false; // suspend the rAF loop
+            try {
+                for (let i = 0; i < warmup; i++) {
+                    _renderFrame(performance.now());
+                    await device.queue.onSubmittedWorkDone();
+                }
+                const samples = [];
+                for (let i = 0; i < frames; i++) {
+                    const t0 = performance.now();
+                    _renderFrame(performance.now());
+                    await device.queue.onSubmittedWorkDone();
+                    samples.push(performance.now() - t0);
+                }
+                if (samples.length === 0) return null;
+                const sorted = [...samples].sort((a, b) => a - b);
+                return {
+                    frames: sorted.length,
+                    medianMs: sorted[Math.floor(sorted.length / 2)],
+                    meanMs: sorted.reduce((a, b) => a + b, 0) / sorted.length,
+                    minMs: sorted[0],
+                    maxMs: sorted[sorted.length - 1],
+                };
+            } finally {
+                active = wasActive;
+                if (active && !rafPending) {
+                    rafPending = true;
+                    requestAnimationFrame(render);
+                }
+            }
+        },
+
         loadGeometry(newDrawable) {
             setDrawable(newDrawable);
         },

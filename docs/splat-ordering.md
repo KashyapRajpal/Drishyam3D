@@ -241,7 +241,7 @@ Stats overlay: … + "sort: X.X ms"
 |---|---|---|---|
 | **A** ✅ | `ReductionStage`/`SortBackend` interfaces + `None` + `Bitonic` (refactor current) + matrix UI | None×Bitonic | low — pure refactor, must match today |
 | **B** ✅ | `Culled` frustum cull + indirect draw + GPU-timestamp reduce/sort timing; octree built + measured → **grid wins** (see Resolved decision 4) | + Culled×Bitonic | done — grid cull ~0.066 ms, exact |
-| **C** ✅ | `Radix` — 4×8-bit LSD, exact, ~13 dispatches, no pow2 padding | + ×Radix column | done — 12–17× faster than bitonic, pixel-identical |
+| **C** ✅ | `Radix` — 4×8-bit LSD, exact, ~13 dispatches, no pow2 padding | + ×Radix column | done — 6–8× faster sort, ~2–2.7× faster frame, pixel-identical |
 | **D** | `Coarse` + vs-oracle quality readout | + Coarse×* | med — approximate; popping to tune |
 | **E** | `LOD` — merged-Gaussian hierarchy | + LOD×* | high — own track, weeks |
 

@@ -5,23 +5,32 @@ Implementation plan for the **Radix** cell of the Sort axis in
 architecture; this one is the build order for the single milestone that matters most right now.
 
 > **Status:** **shipped.** C0–C5 are done: radix is selectable in the matrix, exact against the
-> bitonic oracle, and **12–17× faster on the sort** (see [Results](#results)). Milestones A and B
+> bitonic oracle, **6–8× faster on the sort** and **~2–2.7× faster per frame** (see
+> [Results](#results)). Milestones A and B
 > were shipped earlier (`SortBackend`/`ReductionStage`, `None` + `Culled`, `Bitonic`,
 > GPU-timestamp timing, matrix UI).
 
 ## Results
 
-Measured on the cluster-fly ladder, scenes normalized to origin/radius-1, `None` reduction,
-900×700, medians over alternating A/B rounds after warm-up:
+Measured on the cluster-fly ladder, scenes normalized to origin/radius-1, `None` reduction, 900×700,
+via `scene.measureFrameCost()` — which renders frames back to back awaiting
+`queue.onSubmittedWorkDone()`, so each frame's GPU work is drained before the next is timed:
 
-| scene | bitonic sort | radix sort | speedup | render pass | fps (bitonic → radix) |
-|---|---:|---:|---:|---:|---:|
-| fly M (145,617) | 18.9 ms | **1.11 ms** | **17×** | 7.4 ms | 9 → 17 |
-| fly L (301,958) | 30.0 ms | **2.49 ms** | **12×** | 15.1 ms | ~7 → ~10 |
+| scene | bitonic sort | radix sort | sort | bitonic frame | radix frame | **frame** |
+|---|---:|---:|---:|---:|---:|---:|
+| fly M (145,617) | 6.95 ms | **0.85 ms** | 8.2× | 11.4 ms | **4.2 ms** | **2.7×** |
+| fly L (301,958) | 11.01 ms | **1.84 ms** | 6.0× | 23.6 ms | **12.3 ms** | **1.9×** |
+| fly XXL (3,506,799) | 83.9 ms | **12.5 ms** | 6.7× | 103.3 ms | **40.5 ms** | **2.55×** |
 
-Radix scales linearly — 1.11 → 2.49 ms for 2.07× the splats — which is the O(N) behaviour the
-design predicts. Bitonic's 18.9 → 30.0 ms is sub-linear only because of where the `nextPow2`
-padding happens to land between those two counts.
+So radix is **6–8× faster on the sort** and **~2–2.7× faster end to end**. At XXL that is roughly
+10 fps → 25 fps. The render pass is unchanged by the sort axis, as expected (15.1 ms at XXL either
+way), and is what now dominates once the sort stops doing so — which is the tile renderer's case.
+
+> **These supersede earlier figures of "12–17× on the sort".** Those were taken with the rAF loop
+> free-running, where the GPU queues several frames deep and a pass's measured span stretches to
+> include contention. Draining the queue per frame changes bitonic at XXL from an apparent 1027 ms
+> to a true 83.9 ms. Same code, same scene — only the measurement differs, and only the drained
+> numbers are load-bearing.
 
 Exactness held everywhere it was checked: **0 px differ** against bitonic on M and L, under both
 `None` and `Culled`.
@@ -33,17 +42,18 @@ Exactness held everywhere it was checked: **0 px differ** against bitonic on M a
 >    command buffer is rejected, and the canvas keeps its last good frame. It reads as "fast and
 >    correct" (high fps, small pixel diff) rather than as a failure. Always prove liveness by
 >    perturbing the camera, and capture console *warnings*, not just errors.
-> 2. **`GpuTimer` readback is single-flight and returns the last successful sample.** Measure too
->    soon after load and you get cold-start frames; whichever backend is measured first inherits
->    them. This produced both a fake 15× win and a fake pathological blowup. Warm up, alternate
->    A/B/A/B, take medians over a wide window.
+> 2. **The old `GpuTimer` readback was single-flight and served the last successful sample forever.**
+>    Measure too soon after load and you got cold-start frames; whichever backend ran first inherited
+>    them. This produced both a fake 15× win and a fake pathological blowup, and on XXL it froze
+>    outright — byte-identical numbers for 60 s across a backend switch. Fixed: a ring of readback
+>    slots, and stale samples withheld rather than served (see gpu-timer.js).
 > 3. **`fps` is the rAF callback rate and `frameMs` is CPU encode time only** — neither measures GPU
->    frame cost. Corroborate with timestamp spans.
+>    frame cost, and with work queued several frames deep even a timestamp span stretches. Measure
+>    with `measureFrameCost()`, which drains the queue per frame.
 
-> **Still unaccounted:** at L, `sort + render` ≈ 18 ms against a ~95 ms frame. The gap is not
-> explained by the timed passes and is worth chasing before any further sort tuning — candidates
-> are the untimed `compute_keys` pass, CPU-side per-frame work, and browser/compositor overhead in
-> the headed harness.
+> **The frame-time gap is resolved.** It was an artifact of the free-running loop: with the queue
+> drained, `sort + render` accounts for most of the frame (XXL radix: 12.5 + 14.6 of 40.5 ms; the
+> ~13 ms remainder is the untimed `compute_keys` pass plus per-frame CPU work).
 
 ---
 
@@ -94,7 +104,7 @@ properties (no normals, 236 B stride) — the parser handles them as-is. Extract
 | fly M | 145,617 | 9.3 MB | 262,144 | **+80.0%** | 26.2 MB |
 | fly L | 301,958 | 19.3 MB | 524,288 | +73.6% | 54.4 MB |
 | fly XL | 624,180 | 40.0 MB | 1,048,576 | +68.0% | 112.4 MB |
-| fly XXL | 3,506,799 | **224.4 MB ✗** | 4,194,304 | +19.6% | 631 MB → deg 1 |
+| fly XXL | 3,506,799 | 224.4 MB | 4,194,304 | +19.6% | 631 MB |
 
 Five usable rungs spanning **24× in N**, with real spatial distribution — so cull ratios stay
 meaningful too, which a replicated scene would have destroyed. The M rung is the sweetest data
@@ -105,30 +115,30 @@ that do not exist**.
 > published screenshot or benchmark writeup: [www.danybittel.ch](https://www.danybittel.ch). The
 > `.ply` files stay gitignored under `assets/3dgs/` like every other local capture.
 
-> **XXL is the ceiling test, not a rung.** At 3.5M splats its 224.4 MB splat buffer exceeds the
-> 134.2 MB default binding limit — it should fail to load *today*, with a raw WebGPU validation
-> error rather than a graceful message. Confirming that failure is worth doing once; see below.
+> **XXL was the ceiling test, and the ceiling has since been removed.** Its 224.4 MB splat buffer
+> exceeds the 134.2 MB *default* binding limit, so it failed to load until the device started
+> requesting the adapter's real limits (2048 MB on the test machine). It now loads in ~10 s at SH
+> degree 3 and is a full rung of the ladder.
 
 > **SH degree does not affect the `sort` span.** The sort reads only `posPad.xyz` from the 64-byte
-> struct; SH lives in a separate buffer touched only by the render pass. Only XL comes close to the
-> SH ceiling (112.4 MB of 134.2 MB), so the whole ladder runs at degree 3 — but hold the degree
-> fixed across rungs anyway when comparing *frame* time.
+> struct; SH lives in a separate buffer touched only by the render pass. With the raised limits the
+> whole ladder runs at degree 3 — but hold the degree fixed across rungs anyway when comparing
+> *frame* time.
 
 A synthetic replicator (translation-only lattice, leaving `rot_*` and `f_rest_*` valid) is worth
 building **only** if the 624k → 2.09M gap turns out to matter. Defer it until the ladder says so.
 
-### The ceiling the ladder exposes
+### The ceiling the ladder exposed (fixed)
 
-`requestDevice` passes no `requiredLimits` ([webgpu-helpers.js:32](../scripts/engine/webgpu-helpers.js#L32)),
-so the device takes the **default 128 MiB `maxStorageBufferBindingSize`** regardless of adapter
-capability. At 64 B/splat that caps the splat buffer at **2,097,152 splats** — and unlike the SH
-buffer, `createSplatStorageBuffer` is **never size-checked**
-([webgpu-facade.js:152](../scripts/engine/webgpu-facade.js#L152)), so crossing it is a raw WebGPU
-validation error, not a graceful degrade.
+`requestDevice` used to pass no `requiredLimits` ([webgpu-helpers.js:32](../scripts/engine/webgpu-helpers.js#L32)),
+so the device took the **default 128 MiB `maxStorageBufferBindingSize`** regardless of adapter
+capability. At 64 B/splat that capped the splat buffer at **2,097,152 splats**, which is why fly XXL
+(3.5M splats, 214 MiB) would not load on an adapter reporting 2048 MiB — roughly 10x the headroom it
+was denied. It read as "this machine cannot handle 3M splats"; it was a limit never requested.
 
-This is not hypothetical — **fly XXL (3.5M splats) is already past it**. Out of scope for C, but the
-ladder is what surfaces it; two follow-ups fall out (see
-[Follow-ups](#what-c-reveals--follow-ups)).
+Both halves are now fixed: the device requests the adapter's reported limits, and
+`createSplatStorageBuffer` is size-checked first so an genuinely oversized cloud reports how much it
+needed instead of failing as a bare validation error.
 
 ---
 

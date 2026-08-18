@@ -277,6 +277,9 @@ export async function initWebGPUEngine({ canvas, shaderSources, scriptSource, on
         device, scene, camera,
         setShaders, setScriptSource,
         loadSplats, setSplatFlipY, loadMesh, setSplatDebugMode, setSplatShDegree, setSplatRenderMode, setSplatReduction, setSplatSort,
+        // Benchmark hook: true end-to-end GPU frame cost, for when fps and
+        // timestamp spans can't be trusted (see webgpu-scene.measureFrameCost).
+        measureFrameCost: (opts) => scene.measureFrameCost(opts),
         getStats: () => scene.getStats(),
         destroy: () => {
             if (splatLoader) splatLoader.destroy();
