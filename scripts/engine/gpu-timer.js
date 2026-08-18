@@ -40,8 +40,10 @@ export class GpuTimer {
     /**
      * Reserve a timestamp pair for a named pass. Use as
      * `encoder.beginComputePass({ timestampWrites: timer.span('sort') })`.
+     * Compute and render passes take the same timestampWrites shape, so this
+     * works for `beginRenderPass` too.
      * Returns null when timing is off or the per-frame budget is spent.
-     * @returns {GPUComputePassTimestampWrites|null}
+     * @returns {GPUComputePassTimestampWrites|GPURenderPassTimestampWrites|null}
      */
     span(name) {
         if (!this.enabled || this._spanNames.length >= this.maxSpans) return null;

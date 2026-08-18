@@ -193,7 +193,14 @@ export class SplatRenderer extends Renderer {
         const sortResult = this.sortBackend.run(frame, drawable, this.reduction);
 
         // --- Blend pass (instanced billboards, back-to-front) ---
-        const pass = encoder.beginRenderPass({ colorAttachments: [colorAttachment] });
+        // Timed as 'render': with no early-out, every splat rasterizes its full
+        // quad, so this pass — not the sort — is what dominates large scenes.
+        // Measuring it directly beats inferring it by subtracting sort from fps.
+        const renderTs = frame.gpuTimer?.span('render');
+        const pass = encoder.beginRenderPass({
+            colorAttachments: [colorAttachment],
+            ...(renderTs ? { timestampWrites: renderTs } : {}),
+        });
         pass.setPipeline(this.renderPipeline);
         pass.setBindGroup(0, this.renderBindGroup);
         if (sortResult?.indirect) {

@@ -105,6 +105,7 @@ function StatsOverlay({ stats }) {
       {stats.passMs?.sort != null && (
         <div style={{ color: '#fc6' }}>sort ({stats.sortMode}) {stats.passMs.sort.toFixed(2)}ms</div>
       )}
+      {stats.passMs?.render != null && <div style={{ color: '#fc6' }}>render {stats.passMs.render.toFixed(2)}ms</div>}
     </div>
   )
 }
