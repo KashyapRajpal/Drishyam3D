@@ -90,7 +90,7 @@ export function sampleRectLight(light, rngState) {
 }
 
 /** One-sample next-event estimate for diffuse rectangular lights. */
-export function estimateDirectLighting(hit, material, scene, acceleration, rngState, epsilon) {
+export function estimateDirectLighting(hit, material, scene, acceleration, rngState, epsilon, rayCounter) {
     const lights = (scene.lights || []).filter((light) => light.type === 'rect');
     if (lights.length === 0) return [0, 0, 0];
     const lightIndex = Math.min(lights.length - 1, Math.floor(nextFloat(rngState) * lights.length));
@@ -111,6 +111,7 @@ export function estimateDirectLighting(hit, material, scene, acceleration, rngSt
         origin: add(hit.position, scale(originNormal, epsilon)),
         direction,
     };
+    if (rayCounter) rayCounter.count += 1;
     if (intersectTlas(shadowRay, scene, acceleration, epsilon, distance - epsilon, true)) {
         return [0, 0, 0];
     }
@@ -134,6 +135,7 @@ export function traceSample(initialRay, scene, acceleration, rngState, settings 
 
     for (let bounce = 0; bounce < maxBounces; bounce += 1) {
         if (settings.shouldCancel?.()) break;
+        if (settings.rayCounter) settings.rayCounter.count += 1;
         const hit = intersectTlas(ray, scene, acceleration, epsilon, Infinity);
         if (!hit) {
             radiance = add(radiance, multiply(throughput, scene.environment?.color || [0, 0, 0]));
@@ -147,7 +149,9 @@ export function traceSample(initialRay, scene, acceleration, rngState, settings 
             ));
         }
 
-        const direct = estimateDirectLighting(hit, material, scene, acceleration, rngState, epsilon);
+        const direct = estimateDirectLighting(
+            hit, material, scene, acceleration, rngState, epsilon, settings.rayCounter,
+        );
         radiance = add(radiance, multiply(throughput, direct));
 
         const nextDirection = sampleCosineHemisphere(hit.shadingNormal, rngState);
