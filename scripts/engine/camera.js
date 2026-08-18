@@ -60,7 +60,11 @@ export class Camera {
 
     onWheel(event) {
         event.preventDefault();
-        this.zoom -= event.deltaY * 0.01;
+        // Multiplicative, so one notch moves the same *fraction* of the distance
+        // at any scale. A fixed additive step is unusable on small captures: a
+        // 0.18-radius splat cloud has a usable range under 2 units, which a
+        // single ~100px wheel event crossed entirely — reading as "zoom is stuck".
+        this.zoom *= Math.exp(event.deltaY * 0.001);
         this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.zoom));
         this.updateViewMatrix();
     }

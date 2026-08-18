@@ -128,14 +128,35 @@ export async function loadAssetFromDirectory({ engine, dirHandle, flipY = true }
     throw new Error('No .gltf or .ply found in the selected folder.');
 }
 
+/**
+ * Distance limits fall back to this when a drawable carries no bounds — the
+ * primitives in geometry.js don't. Without a fallback, `frameCamera` returned
+ * early for cube/sphere and the camera kept the *previous* asset's limits, which
+ * is how switching back from a 0.18-radius splat cloud stranded it inside the cube.
+ */
+const DEFAULT_BOUNDS_RADIUS = 1;
+
+/**
+ * Points the camera at a drawable and derives its whole distance range from the
+ * asset's own scale.
+ *
+ * Every limit is **assigned**, never accumulated. `maxZoom` used to be raised via
+ * Math.max and `minZoom` was left at a fixed 1 forever, so limits leaked between
+ * scenes and small captures could not be inspected: 1 is ~5.5x the radius of a
+ * 0.18-radius capture, so it read as "zoom is capped".
+ */
 export function frameCamera(camera, drawable) {
-    if (!camera || !drawable || !drawable.bounds) return;
-    const { center, radius } = drawable.bounds;
-    if (!center || !radius) return;
-    camera.target = center;
-    const desiredZoom = Math.max(radius * 2.5, 2);
-    camera.maxZoom = Math.max(camera.maxZoom || 0, desiredZoom * 2);
-    camera.zoom = desiredZoom;
+    if (!camera) return;
+    const bounds = drawable?.bounds;
+    const radius = bounds?.radius > 0 ? bounds.radius : DEFAULT_BOUNDS_RADIUS;
+    const center = bounds?.center;
+
+    // Copy: keeping the drawable's array by reference would let camera panning
+    // mutate the bounds it was derived from.
+    camera.target = center ? [center[0], center[1], center[2]] : [0, 0, 0];
+    camera.zoom = radius * 2.5;      // whole asset comfortably in frame
+    camera.minZoom = radius * 0.1;   // close enough to inspect detail
+    camera.maxZoom = radius * 10;    // far enough for context, not lost in space
     camera.updateViewMatrix();
 }
 
