@@ -4,6 +4,16 @@ function canvas() {
   return { getContext: jest.fn() };
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe('ray tracing coordinator', () => {
   const OriginalWorker = global.Worker;
   beforeEach(() => { global.Worker = function Worker() {}; });
@@ -168,5 +178,95 @@ describe('ray tracing coordinator', () => {
     expect(coordinator.getRenderMode()).toBe('raster');
     expect(modes).toEqual(['hybrid-shadows', 'raster']);
     expect(retainedImage.close).toHaveBeenCalledTimes(1);
+  });
+
+  test('survives the complete mode sequence, resize, asset replacement, and repeated destruction', async () => {
+    const firstImage = { close: jest.fn() };
+    const secondImage = { close: jest.fn() };
+    const firstScene = { name: 'first' };
+    const secondScene = { name: 'second' };
+    const raster = {
+      camera: { getState: jest.fn(() => ({ zoom: 4 })), setState: jest.fn() },
+      scene: { pause: jest.fn(), resume: jest.fn() },
+      getCapabilities: jest.fn(() => ({
+        'raytrace-gpu': { available: true },
+        'hybrid-shadows': { available: true },
+      })),
+      loadRayScene: jest.fn(async (scene) => ({ kind: 'raytrace', scene })),
+      setRenderMode: jest.fn(async () => {}),
+    };
+    const cpu = {
+      camera: { getState: jest.fn(() => ({ zoom: 6 })), setState: jest.fn() },
+      loadRayScene: jest.fn(), resume: jest.fn(), pause: jest.fn(), resize: jest.fn(), destroy: jest.fn(),
+    };
+    const modes = [];
+    const coordinator = createRayTracingCoordinator({
+      cpuCanvas: canvas(), cpuFactory: async () => cpu, onModeChange: (value) => modes.push(value),
+    });
+    coordinator.setRasterEngine(raster);
+    await coordinator.setSceneAsset({
+      preparedRayScene: firstScene,
+      asset: { images: [firstImage] },
+    });
+
+    await coordinator.setRenderMode('raytrace-cpu');
+    coordinator.resize();
+    await coordinator.setRenderMode('raytrace-gpu');
+    await coordinator.setRenderMode('hybrid-shadows');
+    await coordinator.setRenderMode('raster');
+
+    expect(cpu.loadRayScene).toHaveBeenCalledWith(firstScene);
+    expect(cpu.resize).toHaveBeenCalledTimes(1);
+    expect(raster.loadRayScene).toHaveBeenCalledWith(firstScene, expect.any(Object));
+    expect(raster.setRenderMode.mock.calls.map(([value]) => value)).toEqual([
+      'raytrace-gpu', 'hybrid-shadows', 'raster',
+    ]);
+    expect(modes).toEqual(['raytrace-cpu', 'raytrace-gpu', 'hybrid-shadows', 'raster']);
+
+    await coordinator.setSceneAsset({
+      preparedRayScene: secondScene,
+      asset: { images: [secondImage] },
+    });
+    expect(firstImage.close).toHaveBeenCalledTimes(1);
+    coordinator.destroy();
+    coordinator.destroy();
+    coordinator.resize();
+    expect(secondImage.close).toHaveBeenCalledTimes(1);
+    expect(cpu.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  test('an obsolete GPU asset load cannot replace the newest retained scene', async () => {
+    const firstLoad = deferred();
+    const secondLoad = deferred();
+    const firstScene = { name: 'slow' };
+    const secondScene = { name: 'newest' };
+    const raster = {
+      scene: { pause: jest.fn(), resume: jest.fn() },
+      getCapabilities: jest.fn(() => ({ 'raytrace-gpu': { available: true } })),
+      loadRayScene: jest.fn((scene) => (
+        scene === firstScene ? firstLoad.promise : secondLoad.promise
+      )),
+      setRenderMode: jest.fn(async () => {}),
+    };
+    const coordinator = createRayTracingCoordinator({
+      cpuCanvas: canvas(), cpuFactory: async () => ({ destroy: jest.fn() }),
+    });
+    coordinator.setRasterEngine(raster);
+    await coordinator.setSceneAsset({ preparedRayScene: firstScene });
+    const switching = coordinator.setRenderMode('raytrace-gpu');
+    await Promise.resolve();
+    expect(raster.loadRayScene).toHaveBeenCalledWith(firstScene, expect.any(Object));
+
+    await coordinator.setSceneAsset({ preparedRayScene: secondScene });
+    firstLoad.resolve({ kind: 'raytrace', scene: firstScene });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(raster.loadRayScene).toHaveBeenLastCalledWith(secondScene, expect.any(Object));
+    secondLoad.resolve({ kind: 'raytrace', scene: secondScene });
+    await switching;
+
+    expect(coordinator.getSceneAsset().preparedRayScene).toBe(secondScene);
+    expect(raster.setRenderMode).toHaveBeenLastCalledWith('raytrace-gpu');
+    coordinator.destroy();
   });
 });
