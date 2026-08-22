@@ -42,6 +42,11 @@ describe('CPU ray facade', () => {
     engine.resume();
     expect(controller.render).toHaveBeenCalledWith(expect.objectContaining({ width: 256, height: 192 }));
 
+    engine.pause();
+    engine.resetAccumulation();
+    expect(controller.pause).toHaveBeenCalledTimes(1);
+    expect(controller.reset).toHaveBeenCalledWith(expect.objectContaining({ width: 256, height: 192 }));
+
     callbacks.presentTile({ x: 0, y: 0, width: 1, height: 1, rgbaBuffer: new Uint8ClampedArray([1,2,3,255]).buffer });
     expect(canvas.context.putImageData).toHaveBeenCalledWith(expect.objectContaining({ width: 1, height: 1 }), 0, 0);
     expect(engine.getStats()).toEqual(expect.objectContaining({ spp: 2, triangleCount: 36, instanceCount: 8 }));

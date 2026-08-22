@@ -105,9 +105,14 @@ export async function initCpuRayEngine({
         };
     }
 
-    function resetForViewChange() {
-        if (!scene || destroyed || !active) return;
+    function resetAccumulation() {
+        if (!scene || destroyed) return;
         controller.reset(renderRequest());
+    }
+
+    function resetForViewChange() {
+        if (!active) return;
+        resetAccumulation();
     }
     camera.setChangeHandler(resetForViewChange);
 
@@ -146,7 +151,7 @@ export async function initCpuRayEngine({
                 if (active) controller.render(renderRequest());
             }
         },
-        resetAccumulation: resetForViewChange,
+        resetAccumulation,
         resize() {
             if (!scene || !active) return;
             const next = canvasDisplaySize(canvas, settings);
