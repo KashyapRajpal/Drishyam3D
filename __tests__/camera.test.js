@@ -50,4 +50,18 @@ describe('Camera', () => {
         expect(actualMatrix[i]).toBeCloseTo(expectedMatrix[i]);
     }
   });
+
+  test('state round-trips and destroy removes registered listeners once', () => {
+    camera.target = [1, 2, 3];
+    camera.setPose(0.2, -0.4, 7);
+    const state = camera.getState();
+    const second = new Camera(mockCanvas);
+    second.setState(state);
+    expect(second.getState()).toEqual(state);
+
+    second.destroy();
+    second.destroy();
+    expect(mockCanvas.removeEventListener).toHaveBeenCalledWith('mousedown', second.boundHandlers.mousedown);
+    expect(mockCanvas.removeEventListener).toHaveBeenCalledWith('wheel', second.boundHandlers.wheel);
+  });
 });

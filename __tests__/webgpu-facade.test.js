@@ -2,6 +2,18 @@ const mockScene = {
   loadGeometry: jest.fn(),
   updatePipeline: jest.fn(),
   updateUserScript: jest.fn(),
+  setRayTracingShader: jest.fn(() => true),
+  setHybridShaders: jest.fn(() => true),
+  setHybridShadowShader: jest.fn(() => true),
+  setHybridLight: jest.fn(),
+  setRenderMode: jest.fn(),
+  setRayTracingSettings: jest.fn(),
+  resetRayAccumulation: jest.fn(),
+  loadRayGeometry: jest.fn(),
+  updateRayTlasAndInstances: jest.fn(),
+  getRenderMode: jest.fn(() => 'raster'),
+  readRayAccumulation: jest.fn(),
+  readRayDiagnostics: jest.fn(),
   start: jest.fn(),
   destroy: jest.fn(),
 };
@@ -98,5 +110,68 @@ describe('WebGPU Facade', () => {
     expect(drawable).toBeTruthy();
     expect(drawable.texture).toBeNull();
     expect(drawable.vertexCount).toBeGreaterThan(0);
+  });
+
+  test('loads Cornell Box, exposes GPU mode controls, and retains BLASes for transform revisions', async () => {
+    const result = await initWebGPUEngine({
+      canvas: fakeCanvas,
+      shaderSources: { wgsl: 'mesh shader', raytraceWgsl: 'ray shader' },
+      scriptSource: 'function init(){}\nfunction update(){}',
+      onError: jest.fn(),
+    });
+    expect(mockScene.setRayTracingShader).toHaveBeenCalledWith('ray shader');
+    expect(result.getCapabilities()['raytrace-gpu']).toEqual({ available: true, reason: undefined });
+
+    const first = result.loadCornellBox();
+    expect(first).toMatchObject({ kind: 'raytrace', revisions: { geometryRevision: 0, instanceRevision: 0 } });
+    expect(mockScene.loadRayGeometry).toHaveBeenCalledWith(first);
+    const firstBlases = first.acceleration.blases;
+    expect(result.loadRayScene(first.scene)).toBe(first);
+    expect(mockScene.resetRayAccumulation).not.toHaveBeenCalled();
+    const updated = result.loadRayScene(first.scene, { revisions: { instanceRevision: 1 } });
+    expect(updated).toBe(first);
+    expect(updated.acceleration.blases[0]).toBe(firstBlases[0]);
+    expect(mockScene.updateRayTlasAndInstances).toHaveBeenCalledWith(
+      first,
+      first.packedScene,
+      expect.objectContaining({ nodeByteLength: expect.any(Number), instanceByteLength: expect.any(Number) }),
+    );
+
+    await expect(result.setRenderMode('raytrace-gpu')).resolves.toBe('raytrace-gpu');
+    expect(mockScene.setRenderMode).toHaveBeenCalledWith('raytrace-gpu');
+    result.setRayTracingSettings({ maxBounces: 3 });
+    result.resetAccumulation();
+    expect(mockScene.setRayTracingSettings).toHaveBeenCalledWith({ maxBounces: 3 });
+    expect(mockScene.resetRayAccumulation).toHaveBeenCalled();
+  });
+
+  test('reports GPU ray tracing unavailable when its shader was not supplied', async () => {
+    const result = await initWebGPUEngine({
+      canvas: fakeCanvas,
+      shaderSources: { wgsl: 'mesh shader' },
+      scriptSource: 'function init(){}\nfunction update(){}',
+      onError: jest.fn(),
+    });
+    expect(result.getCapabilities()['raytrace-gpu']).toMatchObject({ available: false });
+    expect(result.getCapabilities()['raytrace-gpu'].reason).toMatch(/shader is unavailable/);
+  });
+
+  test('registers hybrid shaders, light controls, and capability state', async () => {
+    const result = await initWebGPUEngine({
+      canvas: fakeCanvas,
+      shaderSources: {
+        wgsl: 'mesh shader',
+        hybridGbufferWgsl: 'gbuffer shader',
+        hybridCompositeWgsl: 'composite shader',
+        hybridShadowWgsl: 'shadow shader',
+      },
+      scriptSource: 'function init(){}\nfunction update(){}',
+      onError: jest.fn(),
+    });
+    expect(mockScene.setHybridShaders).toHaveBeenCalledWith('gbuffer shader', 'composite shader');
+    expect(mockScene.setHybridShadowShader).toHaveBeenCalledWith('shadow shader');
+    expect(result.getCapabilities()['hybrid-shadows']).toEqual({ available: true, reason: undefined });
+    result.setLight({ type: 'directional', direction: [0, -1, 0] });
+    expect(mockScene.setHybridLight).toHaveBeenCalledWith({ type: 'directional', direction: [0, -1, 0] });
   });
 });

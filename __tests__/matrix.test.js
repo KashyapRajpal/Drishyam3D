@@ -1,4 +1,4 @@
-import { createIdentityMatrix, multiplyMatrices, createPerspectiveMatrix, translateMatrix, rotateMatrix, createLookAtMatrix } from '../scripts/engine/matrix.js';
+import { composeTRSMatrix, createIdentityMatrix, multiplyMatrices, createPerspectiveMatrix, translateMatrix, rotateMatrix, createLookAtMatrix, invertMatrix, transformPoint, transformDirection } from '../scripts/engine/matrix.js';
 
 describe('Matrix Functions', () => {
   test('createIdentityMatrix should return an identity matrix', () => {
@@ -85,5 +85,38 @@ describe('Matrix Functions', () => {
     for (let i = 0; i < expected.length; i++) {
       expect(matrix[i]).toBeCloseTo(expected[i]);
     }
+  });
+
+  test('invertMatrix returns a multiplicative inverse', () => {
+    const matrix = createIdentityMatrix();
+    translateMatrix(matrix, [2, -3, 4]);
+    rotateMatrix(matrix, 0.37, [0, 1, 0]);
+    const inverse = invertMatrix(matrix);
+    const product = multiplyMatrices(matrix, inverse);
+    const identity = createIdentityMatrix();
+    for (let i = 0; i < 16; i += 1) expect(product[i]).toBeCloseTo(identity[i], 5);
+  });
+
+  test('invertMatrix rejects singular matrices', () => {
+    expect(() => invertMatrix(new Float32Array(16))).toThrow(/singular/i);
+  });
+
+  test('point and direction transforms distinguish translation', () => {
+    const matrix = createIdentityMatrix();
+    translateMatrix(matrix, [2, 3, 4]);
+    expect(transformPoint(matrix, [1, 1, 1])).toEqual([3, 4, 5]);
+    expect(transformDirection(matrix, [1, 1, 1])).toEqual([1, 1, 1]);
+  });
+
+  test('composeTRSMatrix follows glTF T * R * S order', () => {
+    const matrix = composeTRSMatrix(
+      [10, 0, 0],
+      [0, 0, Math.SQRT1_2, Math.SQRT1_2],
+      [2, 3, 4],
+    );
+    const point = transformPoint(matrix, [1, 1, 1]);
+    expect(point[0]).toBeCloseTo(7);
+    expect(point[1]).toBeCloseTo(2);
+    expect(point[2]).toBeCloseTo(4);
   });
 });

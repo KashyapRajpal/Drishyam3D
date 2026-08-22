@@ -5,6 +5,9 @@ import 'codemirror/theme/dracula.css'
 import 'codemirror/mode/javascript/javascript'
 import 'codemirror/mode/clike/clike'
 import { initEngine } from '@engine/app-facade.js'
+import { initCpuRayEngine } from '@engine/cpu-ray-facade.js'
+import { createCpuRayWorker } from '@engine/raytracing/cpu/cpu-ray-worker-client.js'
+import { createRayTracingCoordinator } from '@engine/raytracing-coordinator.js'
 import { createDefaultCube, createDefaultTexturedCube, createSphere, createTexturedSphere } from '@engine/geometry.js'
 import { createWebGPUGeometryFactory } from '@engine/webgpu-facade.js'
 import checkerboardTextureUrl from '@assets/checkerboard-texture.png'
@@ -17,6 +20,10 @@ import blitWgsl from '@assets/shaders/blit.wgsl?raw'
 import tileRenderWgsl from '@assets/shaders/splat-tile-render.wgsl?raw'
 import splatCullWgsl from '@assets/shaders/splat-cull.wgsl?raw'
 import splatRadixWgsl from '@assets/shaders/splat-radix-sort.wgsl?raw'
+import raytraceWgsl from '@assets/shaders/raytrace.wgsl?raw'
+import hybridGbufferWgsl from '@assets/shaders/hybrid-gbuffer.wgsl?raw'
+import hybridCompositeWgsl from '@assets/shaders/hybrid-composite.wgsl?raw'
+import hybridShadowWgsl from '@assets/shaders/hybrid-shadow.wgsl?raw'
 import defaultScript from '@scripts/scene-script.js?raw'
 import logoJpg from '@assets/logo/drishyam3d_logo.jpg'
 import { setupSettings } from '@engine/settings.js'
@@ -24,9 +31,18 @@ import {
   loadShape,
   resetScene as resetSceneOp,
   loadSampleGltf,
+  SAMPLE_GLTF_MODEL,
   loadAssetFiles,
   loadAssetFromDirectory,
 } from '@engine/scene-ops.js'
+import { ViewportCanvases } from './components/ViewportCanvases.jsx'
+import { RayTracingControls } from './components/RayTracingControls.jsx'
+import {
+  DEFAULT_HYBRID_LIGHT,
+  DEFAULT_RAY_TRACING_SETTINGS,
+  mergeHybridLight,
+  mergeRayTracingSettings,
+} from './ray-control-state.js'
 
 const shaderFiles = import.meta.glob('../../assets/shaders/**/*.{vert,frag,glsl,wgsl}', { query: '?raw', import: 'default' })
 const engineFiles = import.meta.glob('../../scripts/engine/**/*.js', { query: '?raw', import: 'default' })
@@ -37,6 +53,13 @@ const defaultVertPath = Object.keys(shaderFiles).find((p) => p.endsWith('default
 const defaultFragPath = Object.keys(shaderFiles).find((p) => p.endsWith('default.frag'))
 const defaultWgslPath = Object.keys(shaderFiles).find((p) => p.endsWith('default.wgsl'))
 const sceneScriptPath = Object.keys(sceneFiles).find((p) => p.endsWith('scene-script.js'))
+
+// Keep CPU engine creation lazy, but let Vite see the worker factory in the
+// static UI graph. The dev configuration keeps Vite's internal `/@fs/` worker
+// routes at the server root; production still receives the GitHub Pages base.
+function initBundledCpuRayEngine(options) {
+  return initCpuRayEngine({ ...options, workerFactory: createCpuRayWorker })
+}
 
 function normalizePath(p) {
   return p.replace(/^\.\.\/\.\.\//, '')
@@ -77,6 +100,9 @@ function formatCount(n) {
 
 function StatsOverlay({ stats }) {
   if (!stats) return null
+  const isCpuRayTracing = stats.renderMode === 'raytrace-cpu'
+  const isGpuRayTracing = stats.renderMode === 'raytrace-gpu'
+  const isHybridRayTracing = stats.renderMode === 'hybrid-shadows'
   return (
     <div style={{
       position: 'absolute',
@@ -92,9 +118,29 @@ function StatsOverlay({ stats }) {
       pointerEvents: 'none',
       zIndex: 1000,
     }}>
-      <div>{stats.fps} fps ({stats.frameMs}ms)</div>
+      {isCpuRayTracing ? (
+        <>
+          <div>CPU path tracing · {stats.spp || 0} spp</div>
+          <div>{formatCount(stats.raysPerSecond || 0)} rays/s · {(stats.frameMs || 0).toFixed(1)}ms pass</div>
+        </>
+      ) : isGpuRayTracing ? (
+        <>
+          <div>GPU path tracing · {stats.spp || 0} spp</div>
+          <div>{stats.fps} fps ({stats.frameMs}ms)</div>
+        </>
+      ) : isHybridRayTracing ? (
+        <>
+          <div>Hybrid ray-traced shadows</div>
+          <div>{stats.fps} fps ({stats.frameMs}ms)</div>
+        </>
+      ) : <div>{stats.fps} fps ({stats.frameMs}ms)</div>}
       <div>{stats.drawableKind}</div>
       {stats.triangleCount > 0 && <div>{formatCount(stats.triangleCount)} tris</div>}
+      {stats.blasBuildMs > 0 && <div style={{ color: '#9cf' }}>BLAS {stats.blasBuildMs.toFixed(2)}ms</div>}
+      {stats.tlasBuildMs > 0 && <div style={{ color: '#9cf' }}>TLAS {stats.tlasBuildMs.toFixed(2)}ms</div>}
+      {isHybridRayTracing && stats.passMs?.gbuffer != null && <div style={{ color: '#fc6' }}>G-buffer {stats.passMs.gbuffer.toFixed(2)}ms</div>}
+      {isHybridRayTracing && stats.passMs?.shadow != null && <div style={{ color: '#fc6' }}>shadow {stats.passMs.shadow.toFixed(2)}ms</div>}
+      {isHybridRayTracing && stats.passMs?.composite != null && <div style={{ color: '#fc6' }}>composite {stats.passMs.composite.toFixed(2)}ms</div>}
       {stats.splatCount > 0 && <div>{formatCount(stats.splatCount)} splats</div>}
       {stats.splatCount > 0 && stats.reductionMode === 'culled' && (
         <div style={{ color: '#6cf' }}>
@@ -169,6 +215,12 @@ export default function App(){
   // Visual-regression harness loads with ?test=1 and drives WebGPU splats directly.
   const isVisualTest = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('test')
   const [backend, setBackend] = useState(isVisualTest ? 'webgpu' : 'webgl')
+  const [renderMode, setRenderMode] = useState('raster')
+  const [hasRayScene, setHasRayScene] = useState(false)
+  const [hasHybridScene, setHasHybridScene] = useState(false)
+  const [rayPaused, setRayPaused] = useState(false)
+  const [raySettings, setRaySettings] = useState(() => mergeRayTracingSettings(DEFAULT_RAY_TRACING_SETTINGS))
+  const [hybridLight, setHybridLight] = useState(() => mergeHybridLight(DEFAULT_HYBRID_LIGHT))
   const [error, setError] = useState(null)
   const [textured, setTextured] = useState(false)
   const [currentShape, setCurrentShape] = useState('cube')
@@ -184,9 +236,31 @@ export default function App(){
   const [stats, setStats] = useState(null)
   const [engineReady, setEngineReady] = useState(0)
   const canvasRef = useRef(null)
+  const cpuCanvasRef = useRef(null)
   const engineRef = useRef(null)
+  const rayCoordinatorRef = useRef(null)
   const geometryFactoryRef = useRef(null)
   const pickerActiveRef = useRef(false)
+  const pendingSampleLoadRef = useRef(false)
+
+  useEffect(() => {
+    if (!cpuCanvasRef.current) return
+    const coordinator = createRayTracingCoordinator({
+      cpuCanvas: cpuCanvasRef.current,
+      cpuFactory: initBundledCpuRayEngine,
+      onModeChange: setRenderMode,
+      onError: (err) => setError(err?.message || String(err)),
+    })
+    rayCoordinatorRef.current = coordinator
+    if (engineRef.current) coordinator.setRasterEngine(engineRef.current)
+    const handleResize = () => coordinator.resize()
+    window.addEventListener('resize', handleResize)
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      coordinator.destroy()
+      if (rayCoordinatorRef.current === coordinator) rayCoordinatorRef.current = null
+    }
+  }, [])
 
   useEffect(()=>{
     let cancelled = false
@@ -204,6 +278,10 @@ export default function App(){
             tileRenderWgsl,
             splatCullWgsl,
             splatRadixWgsl,
+            raytraceWgsl,
+            hybridGbufferWgsl,
+            hybridCompositeWgsl,
+            hybridShadowWgsl,
           }
         : { vertex: fileContents[defaultVertPath], fragment: fileContents[defaultFragPath] }
 
@@ -223,9 +301,19 @@ export default function App(){
         return
       }
       engineRef.current = engine
+      rayCoordinatorRef.current?.setRasterEngine(engine)
 
-      // Expose the engine for the visual-regression harness (?test=1 only).
-      if (isVisualTest) window.__DRISHYAM_ENGINE = engine
+      // Expose test surfaces only for the visual-regression harness. The ray
+      // helper is dynamically imported so its CPU oracle stays out of normal loads.
+      if (isVisualTest) {
+        const { createRayVisualTestApi } = await import('@engine/raytracing/visual-test-api.js')
+        if (cancelled) return
+        window.__DRISHYAM_ENGINE = engine
+        window.__DRISHYAM_RAY_TEST = createRayVisualTestApi({
+          engine,
+          coordinator: rayCoordinatorRef.current,
+        })
+      }
 
       setupSettings((k,v)=>{})
       geometryFactoryRef.current = backend === 'webgpu'
@@ -250,6 +338,11 @@ export default function App(){
         }
         engineRef.current = null
       }
+      if (isVisualTest) {
+        delete window.__DRISHYAM_ENGINE
+        delete window.__DRISHYAM_RAY_TEST
+      }
+      rayCoordinatorRef.current?.setRasterEngine(null)
       geometryFactoryRef.current = null
     }
   }, [backend])
@@ -257,7 +350,10 @@ export default function App(){
   // Reset menu state when the backend changes (new engine, fresh UI)
   useEffect(() => {
     setHasModelLoaded(false)
-    setCurrentShape('cube')
+    // The built-in watch is a multi-primitive ray-tracing sample. When its menu
+    // action moves the app from WebGL to WebGPU, leave the procedural cube out
+    // of the new engine so it cannot race and overwrite the pending watch load.
+    setCurrentShape(pendingSampleLoadRef.current ? null : 'cube')
     setTextured(false)
     setSplatLoaded(false)
     setSplatDebug('off')
@@ -266,6 +362,9 @@ export default function App(){
     setSplatSort('bitonic')
     setSplatReduction('none')
     setFlipSplatY(true)
+    setHasRayScene(false)
+    setHasHybridScene(false)
+    setRayPaused(false)
   }, [backend])
 
   // Apply the splat debug mode to the active engine.
@@ -323,17 +422,28 @@ export default function App(){
     }
   }, [engineReady, flipSplatY, splatLoaded])
 
-  // Poll stats when visible.
+  // Progressive controls always need the current SPP; the full overlay remains opt-in.
   useEffect(() => {
-    if (!showStats || !engineReady) return
-    const engine = engineRef.current
+    const progressive = renderMode === 'raytrace-cpu' || renderMode === 'raytrace-gpu'
+    if ((!showStats && !progressive) || !engineReady) return
+    const engine = renderMode === 'raytrace-cpu' ? rayCoordinatorRef.current : engineRef.current
     const timer = setInterval(() => {
       if (engine && typeof engine.getStats === 'function') {
         setStats(engine.getStats())
       }
     }, 200)
     return () => clearInterval(timer)
-  }, [showStats, engineReady])
+  }, [showStats, engineReady, renderMode])
+
+  useEffect(() => {
+    if (!engineReady || backend !== 'webgpu') return
+    try {
+      rayCoordinatorRef.current?.setLight(hybridLight)
+      setError(null)
+    } catch (err) {
+      setError(`Hybrid Light Error: ${err?.message || String(err)}`)
+    }
+  }, [engineReady, backend, hybridLight])
 
   // Drive the current shape from React state. Reacts to shape/textured/engine changes.
   useEffect(() => {
@@ -343,23 +453,54 @@ export default function App(){
     if (!engine || !geometryFactory) return
     let cancelled = false
     loadShape({ engine, geometryFactory, shape: currentShape, textured })
-      .then(() => { if (!cancelled) setError(null) })
+      .then(async () => {
+        if (cancelled) return
+        await rayCoordinatorRef.current?.setSceneAsset(null)
+        setHasRayScene(false)
+        setHasHybridScene(false)
+        setError(null)
+      })
       .catch((e) => { if (!cancelled) setError(e?.message || String(e)) })
     return () => { cancelled = true }
   }, [engineReady, currentShape, textured, hasModelLoaded])
 
+  // A backend change starts the WebGPU engine asynchronously. Key this effect
+  // only to engineReady so it cannot consume the request during the intervening
+  // render where `backend` changed but the new engine has not finished booting.
+  useEffect(() => {
+    if (!engineReady || backend !== 'webgpu' || !pendingSampleLoadRef.current) return
+    pendingSampleLoadRef.current = false
+    void loadBuiltInSample()
+  }, [engineReady])
+
   // --- File menu handlers ---
-  async function handleLoadSample(e) {
-    e.preventDefault()
+  async function loadBuiltInSample() {
     const engine = engineRef.current
     if (!engine) return
     try {
-      await loadSampleGltf({ engine })
+      await rayCoordinatorRef.current?.setRenderMode('raster')
+      const drawable = await loadSampleGltf({ engine })
+      await rayCoordinatorRef.current?.setSceneAsset(drawable)
+      setHasRayScene(true)
+      setHasHybridScene(true)
       setHasModelLoaded(true)
+      setCurrentShape(null)
       setError(null)
     } catch (err) {
+      setCurrentShape('cube')
       setError(`Sample GLTF Error: ${err?.message || String(err)}`)
     }
+  }
+
+  async function handleLoadSample(e) {
+    e.preventDefault()
+    if (backend !== 'webgpu') {
+      pendingSampleLoadRef.current = true
+      setError(null)
+      setBackend('webgpu')
+      return
+    }
+    await loadBuiltInSample()
   }
 
   // Unified asset load: pick the folder containing the model — the loader finds
@@ -374,10 +515,12 @@ export default function App(){
     pickerActiveRef.current = true
     window.__DRISHYAM_PICKER_ACTIVE = true
     try {
+      await rayCoordinatorRef.current?.setRenderMode('raster')
       let kind
+      let drawable
       if (window.showDirectoryPicker) {
         const dirHandle = await window.showDirectoryPicker()
-        ;({ kind } = await loadAssetFromDirectory({ engine, dirHandle, flipY: flipSplatY }))
+        ;({ kind, drawable } = await loadAssetFromDirectory({ engine, dirHandle, flipY: flipSplatY }))
       } else {
         // Fallback (no directory API): multi-select the model + its companions.
         const isWebGPU = backend === 'webgpu'
@@ -389,8 +532,12 @@ export default function App(){
           input.click()
         })
         if (!files?.length) return
-        ;({ kind } = await loadAssetFiles({ engine, files, flipY: flipSplatY }))
+        ;({ kind, drawable } = await loadAssetFiles({ engine, files, flipY: flipSplatY }))
       }
+      const rayTraceable = !!drawable?.rayTracing
+      await rayCoordinatorRef.current?.setSceneAsset(rayTraceable ? drawable : null)
+      setHasRayScene(rayTraceable)
+      setHasHybridScene(rayTraceable)
       setSplatLoaded(kind === 'splat')
       setHasModelLoaded(true)
       setError(null)
@@ -408,7 +555,11 @@ export default function App(){
     const geometryFactory = geometryFactoryRef.current
     if (!engine || !geometryFactory) return
     try {
+      await rayCoordinatorRef.current?.setRenderMode('raster')
       await resetSceneOp({ engine, geometryFactory })
+      await rayCoordinatorRef.current?.setSceneAsset(null)
+      setHasRayScene(false)
+      setHasHybridScene(false)
       setHasModelLoaded(false)
       setCurrentShape('cube')
       setTextured(false)
@@ -424,6 +575,105 @@ export default function App(){
     e.preventDefault()
     if (hasModelLoaded) return
     setCurrentShape(shape)
+  }
+
+  async function handleCornellBox(e) {
+    e.preventDefault()
+    const coordinator = rayCoordinatorRef.current
+    if (!coordinator) return
+    try {
+      await coordinator.loadCornellBox()
+      await coordinator.setRenderMode('raytrace-cpu')
+      coordinator.setRayTracingSettings(raySettings)
+      setHasModelLoaded(true)
+      setSplatLoaded(false)
+      setCurrentShape(null)
+      setHasRayScene(true)
+      setHasHybridScene(false)
+      setRayPaused(false)
+      setError(null)
+    } catch (err) {
+      setError(`CPU Ray Tracing Error: ${err?.message || String(err)}`)
+    }
+  }
+
+  async function handleGpuCornellBox(e) {
+    e.preventDefault()
+    const coordinator = rayCoordinatorRef.current
+    if (!coordinator) return
+    try {
+      if (backend !== 'webgpu') throw new Error('Switch to WebGPU before starting GPU ray tracing.')
+      await coordinator.loadCornellBox('raytrace-gpu')
+      await coordinator.setRenderMode('raytrace-gpu')
+      coordinator.setRayTracingSettings(raySettings)
+      setHasModelLoaded(true)
+      setSplatLoaded(false)
+      setCurrentShape(null)
+      setHasRayScene(true)
+      setHasHybridScene(false)
+      setRayPaused(false)
+      setError(null)
+    } catch (err) {
+      setError(`GPU Ray Tracing Error: ${err?.message || String(err)}`)
+    }
+  }
+
+  async function selectRasterBackend(e, nextBackend) {
+    e.preventDefault()
+    try {
+      if (rayPaused) rayCoordinatorRef.current?.resume()
+      await rayCoordinatorRef.current?.setRenderMode('raster')
+      setBackend(nextBackend)
+      setRayPaused(false)
+      setError(null)
+    } catch (err) {
+      setError(err?.message || String(err))
+    }
+  }
+
+  async function selectRayRenderMode(nextMode) {
+    const coordinator = rayCoordinatorRef.current
+    if (!coordinator) return
+    try {
+      if (rayPaused) coordinator.resume()
+      await coordinator.setRenderMode(nextMode)
+      if (nextMode === 'raytrace-cpu' || nextMode === 'raytrace-gpu') {
+        coordinator.setRayTracingSettings(raySettings)
+      } else if (nextMode === 'hybrid-shadows') {
+        coordinator.setLight(hybridLight)
+      }
+      setRayPaused(false)
+      setError(null)
+    } catch (err) {
+      setError(`Ray Tracing Error: ${err?.message || String(err)}`)
+    }
+  }
+
+  function toggleRayPause() {
+    const coordinator = rayCoordinatorRef.current
+    if (!coordinator) return
+    if (rayPaused) coordinator.resume()
+    else coordinator.pause()
+    setRayPaused((value) => !value)
+  }
+
+  function resetRayAccumulation() {
+    rayCoordinatorRef.current?.resetAccumulation()
+  }
+
+  function updateRayTracingSettings(partial) {
+    const next = mergeRayTracingSettings(raySettings, partial)
+    try {
+      rayCoordinatorRef.current?.setRayTracingSettings(next)
+      setRaySettings(next)
+      setError(null)
+    } catch (err) {
+      setError(`Ray Tracing Settings Error: ${err?.message || String(err)}`)
+    }
+  }
+
+  function updateHybridLight(partial) {
+    setHybridLight((current) => mergeHybridLight(current, partial))
   }
 
   // Handlers to apply edits
@@ -742,12 +992,24 @@ export default function App(){
           <div id="file-menu-container" className="menu-container">
             <div className="menu-item" role="button" tabIndex="0" aria-label="File menu">File</div>
             <div className="dropdown-content">
-              <a href="#" onClick={handleLoadSample}>Load Sample Model</a>
+              <a
+                href="#"
+                onClick={handleLoadSample}
+                title={`${SAMPLE_GLTF_MODEL.name} by ${SAMPLE_GLTF_MODEL.creator} · ${SAMPLE_GLTF_MODEL.license} · switches to WebGPU when needed`}
+              >Load {SAMPLE_GLTF_MODEL.name} ({SAMPLE_GLTF_MODEL.license})</a>
               <a href="#" onClick={handleLoadAsset} title={backend === 'webgpu'
                 ? "Select the model's folder — the .gltf or .ply inside loads with its .bin/textures automatically (splat vs mesh detected)."
                 : "Select the model's folder — the .gltf inside loads with its .bin/textures. (Switch to WebGPU for .ply splats/meshes.)"}>Load Asset…</a>
               <div className="menu-separator"></div>
               <a href="#" onClick={handleResetScene}>Reset Scene</a>
+            </div>
+          </div>
+
+          <div id="examples-menu-container" className="menu-container">
+            <div className="menu-item" role="button" tabIndex="0" aria-label="Examples menu">Examples</div>
+            <div className="dropdown-content">
+              <a href="#" style={renderMode === 'raytrace-cpu' ? {fontWeight:'bold'} : {}} onClick={handleCornellBox}>Cornell Box · CPU</a>
+              <a href="#" className={backend !== 'webgpu' ? 'disabled' : ''} style={renderMode === 'raytrace-gpu' ? {fontWeight:'bold'} : {}} onClick={handleGpuCornellBox}>Cornell Box · GPU</a>
             </div>
           </div>
 
@@ -771,9 +1033,26 @@ export default function App(){
           <div id="settings-menu-container" className="menu-container">
             <div className="menu-item" role="button" tabIndex="0" aria-label="Settings menu">Settings</div>
             <div className="dropdown-content">
-              <div className="menu-label" style={{padding:'4px 12px',opacity:0.6,fontSize:'0.8em',userSelect:'none'}}>Renderer</div>
-              <a href="#" style={backend === 'webgl' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setBackend('webgl') }}>WebGL</a>
-              <a href="#" style={backend === 'webgpu' ? {fontWeight:'bold'} : {}} onClick={(e) => { e.preventDefault(); setBackend('webgpu') }}>WebGPU</a>
+              <div className="menu-label" style={{padding:'4px 12px',opacity:0.6,fontSize:'0.8em',userSelect:'none'}}>Raster Backend</div>
+              <a href="#" style={backend === 'webgl' && renderMode === 'raster' ? {fontWeight:'bold'} : {}} onClick={(e) => selectRasterBackend(e, 'webgl')}>WebGL</a>
+              <a href="#" style={backend === 'webgpu' && renderMode === 'raster' ? {fontWeight:'bold'} : {}} onClick={(e) => selectRasterBackend(e, 'webgpu')}>WebGPU</a>
+              <div className="menu-separator"></div>
+              <RayTracingControls
+                backend={backend}
+                renderMode={renderMode}
+                hasRayScene={hasRayScene}
+                hasHybridScene={hasHybridScene}
+                capabilities={rayCoordinatorRef.current?.getCapabilities?.() || {}}
+                paused={rayPaused}
+                spp={stats?.renderMode === renderMode ? stats.spp || 0 : 0}
+                raySettings={raySettings}
+                hybridLight={hybridLight}
+                onSelectMode={selectRayRenderMode}
+                onTogglePause={toggleRayPause}
+                onResetAccumulation={resetRayAccumulation}
+                onChangeRaySettings={updateRayTracingSettings}
+                onChangeHybridLight={updateHybridLight}
+              />
               {splatLoaded && (
                 <>
                   <div className="menu-separator"></div>
@@ -866,11 +1145,10 @@ export default function App(){
         </aside>
 
         <section className="center-panel">
-          <div className="viewport-canvas-wrap" style={{position:'relative'}}>
-            <canvas key={backend} ref={canvasRef} className="viewport-canvas" id="glcanvas" aria-label="3D scene viewport" />
+          <ViewportCanvases rasterCanvasRef={canvasRef} cpuCanvasRef={cpuCanvasRef} rasterKey={backend} renderMode={renderMode}>
             <StatsOverlay stats={showStats ? stats : null} />
             <input type="file" id="model-file-input" style={{display:'none'}} accept=".zip,.gltf" multiple />
-          </div>
+          </ViewportCanvases>
         </section>
 
         <aside className="right-panel">

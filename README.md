@@ -9,6 +9,8 @@ Drishyam3D is a lightweight, browser-based 3D scene editor built with **WebGPU**
 ## Features
 
 *   **Dual Rendering Backends**: Choose between **WebGL** or **WebGPU** in Settings for high-performance rendering with modern GPU capabilities.
+*   **CPU and GPU Path Tracing**: Render the procedural Cornell Box or retained glTF geometry progressively, with live SPP, bounce, sampling, pause, and reset controls.
+*   **Hybrid Ray-Traced Shadows**: Keep WebGPU raster primary visibility while tracing real-time hard shadows for glTF objects, with directional/point light controls and BLAS/TLAS timing stats.
 *   **Triangle-Based Rendering**: Render meshes, glTF models, and procedural shapes with full shader control.
 *   **3D Gaussian Splatting**: Load and render `.ply` scenes captured with neural rendering techniques. Includes GPU-accelerated bitonic depth sorting and optional debug visualization modes.
 *   **Flexible Model Import**: Import GLTF models from local files (including `.zip` archives or entire directories) or load a sample model directly from the web.
@@ -19,6 +21,7 @@ Drishyam3D is a lightweight, browser-based 3D scene editor built with **WebGPU**
 *   **Real-time Reload**: Instantly apply your shader and script changes with the **Apply** button.
 *   **Error Console**: Displays compilation and runtime errors from your code to help with debugging.
 *   **Clean, Resizable UI**: A modern React-based layout with tabbed editors and responsive panels.
+*   **Planned Chronograph Material Fidelity (post-MVP)**: Transmission, normal and ORM maps, material variants, texture transforms, and glTF animation are a separate follow-up feature rather than part of the ray-tracing MVP.
 
 ## Screenshots & Demo
 
@@ -113,7 +116,16 @@ The editor is divided into three main panels and a top menu bar.
 ### Menu Bar
 
 *   **File Menu**:
-    *   `Load Sample Model`: Loads a textured cube GLTF model from the web for quick testing.
+    *   `Load Chronograph Watch (CC BY 4.0)`: Loads the
+        [Khronos Chronograph Watch](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/ChronographWatch)
+        external-file glTF for a realistic multi-mesh sample and ray-traced-shadow stress case.
+        The app switches to WebGPU automatically because the legacy WebGL path renders only one
+        glTF primitive, while this asset contains 19.
+        The model and textures are by Eric Chadwick / Darmstadt Graphics Group GmbH and are
+        used under [CC BY 4.0 and the accompanying logo terms](https://github.com/KhronosGroup/glTF-Sample-Assets/blob/main/Models/ChronographWatch/LICENSE.md).
+        Geometry, base-color textures, and hybrid shadows load today; transmission, material
+        variants, texture transforms, glTF animation, and full normal/ORM PBR shading are not
+        yet represented faithfully.
     *   `Load Asset…`: Opens a **folder picker** and loads the model inside it (see
         [Asset folder convention](#asset-folder-convention)). The format is detected automatically:
         a `.gltf` (with its `.bin`/textures) on either backend, or a `.ply` on **WebGPU** — which is

@@ -6,7 +6,10 @@
   "scripts": {
     "test": "jest",
     "visual": "node visual/run-visual.mjs",
-    "visual:update": "node visual/run-visual.mjs --update"
+    "visual:update": "node visual/run-visual.mjs --update",
+    "visual:splat": "node visual/run-visual.mjs",
+    "visual:ray": "node visual/run-ray-visual.mjs",
+    "visual:ray:update": "node visual/run-ray-visual.mjs --update"
   },
   "repository": {
     "type": "git",

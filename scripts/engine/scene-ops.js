@@ -9,6 +9,16 @@ import { parseMeshPly } from './mesh-ply-loader.js';
 
 const IMAGE_RE = /\.(jpe?g|png|webp)$/i;
 
+export const SAMPLE_GLTF_MODEL = Object.freeze({
+    name: 'Chronograph Watch',
+    creator: 'Eric Chadwick / Darmstadt Graphics Group GmbH',
+    url: 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/ChronographWatch/glTF/ChronographWatch.gltf',
+    sourceUrl: 'https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/ChronographWatch',
+    license: 'CC BY 4.0',
+    licenseUrl: 'https://github.com/KhronosGroup/glTF-Sample-Assets/blob/main/Models/ChronographWatch/LICENSE.md',
+    cameraZoomScale: 3.2,
+});
+
 /**
  * Finds a texture file that pairs with a model file by basename.
  * For example, "Bear.ply" matches "Bear_0.jpg", "Bear_diffuse.jpg", or just "Bear.jpg".
@@ -145,7 +155,7 @@ const DEFAULT_BOUNDS_RADIUS = 1;
  * scenes and small captures could not be inspected: 1 is ~5.5x the radius of a
  * 0.18-radius capture, so it read as "zoom is capped".
  */
-export function frameCamera(camera, drawable) {
+export function frameCamera(camera, drawable, { zoomScale = 2.5 } = {}) {
     if (!camera) return;
     const bounds = drawable?.bounds;
     const radius = bounds?.radius > 0 ? bounds.radius : DEFAULT_BOUNDS_RADIUS;
@@ -154,7 +164,7 @@ export function frameCamera(camera, drawable) {
     // Copy: keeping the drawable's array by reference would let camera panning
     // mutate the bounds it was derived from.
     camera.target = center ? [center[0], center[1], center[2]] : [0, 0, 0];
-    camera.zoom = radius * 2.5;      // whole asset comfortably in frame
+    camera.zoom = radius * zoomScale; // whole asset comfortably in frame
     camera.minZoom = radius * 0.1;   // close enough to inspect detail
     camera.maxZoom = radius * 10;    // far enough for context, not lost in space
     camera.updateViewMatrix();
@@ -215,10 +225,13 @@ export async function loadMeshFile({ engine, files }) {
 }
 
 export async function loadSampleGltf({ engine }) {
-    const url = 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/main/2.0/BoxTextured/glTF/BoxTextured.gltf';
-    const drawable = await parseGltfForBackend(engine, url);
+    // Use the external-file glTF distribution. The equivalent GLB embeds its
+    // PNGs in bufferViews, which the loader does not support yet.
+    const drawable = await parseGltfForBackend(engine, SAMPLE_GLTF_MODEL.url);
     engine.scene.loadGeometry(drawable);
-    frameCamera(engine.camera, drawable);
+    // The editor viewport is narrower than its height at common desktop sizes;
+    // leave extra room for the watch and its long strap along the horizontal axis.
+    frameCamera(engine.camera, drawable, { zoomScale: SAMPLE_GLTF_MODEL.cameraZoomScale });
     return drawable;
 }
 

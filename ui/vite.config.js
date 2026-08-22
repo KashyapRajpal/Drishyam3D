@@ -2,9 +2,10 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
-export default defineConfig({
-  // For GitHub Pages, set base to the repo name (change if you fork/rename)
-  base: '/Drishyam3D/',
+export default defineConfig(({ command, isPreview }) => ({
+  // Vite's internal /@fs/ module and worker routes must remain rooted at `/`
+  // during development. Keep the repository base only for built/previewed files.
+  base: command === 'serve' && !isPreview ? '/' : '/Drishyam3D/',
   plugins: [react()],
   resolve: {
     alias: {
@@ -33,4 +34,4 @@ export default defineConfig({
       }
     }
   }
-})
+}))
