@@ -30,6 +30,7 @@ import {
   loadShape,
   resetScene as resetSceneOp,
   loadSampleGltf,
+  SAMPLE_GLTF_MODEL,
   loadAssetFiles,
   loadAssetFromDirectory,
 } from '@engine/scene-ops.js'
@@ -224,6 +225,7 @@ export default function App(){
   const rayCoordinatorRef = useRef(null)
   const geometryFactoryRef = useRef(null)
   const pickerActiveRef = useRef(false)
+  const pendingSampleLoadRef = useRef(false)
 
   useEffect(() => {
     if (!cpuCanvasRef.current) return
@@ -332,7 +334,10 @@ export default function App(){
   // Reset menu state when the backend changes (new engine, fresh UI)
   useEffect(() => {
     setHasModelLoaded(false)
-    setCurrentShape('cube')
+    // The built-in watch is a multi-primitive ray-tracing sample. When its menu
+    // action moves the app from WebGL to WebGPU, leave the procedural cube out
+    // of the new engine so it cannot race and overwrite the pending watch load.
+    setCurrentShape(pendingSampleLoadRef.current ? null : 'cube')
     setTextured(false)
     setSplatLoaded(false)
     setSplatDebug('off')
@@ -432,9 +437,17 @@ export default function App(){
     return () => { cancelled = true }
   }, [engineReady, currentShape, textured, hasModelLoaded])
 
+  // A backend change starts the WebGPU engine asynchronously. Key this effect
+  // only to engineReady so it cannot consume the request during the intervening
+  // render where `backend` changed but the new engine has not finished booting.
+  useEffect(() => {
+    if (!engineReady || backend !== 'webgpu' || !pendingSampleLoadRef.current) return
+    pendingSampleLoadRef.current = false
+    void loadBuiltInSample()
+  }, [engineReady])
+
   // --- File menu handlers ---
-  async function handleLoadSample(e) {
-    e.preventDefault()
+  async function loadBuiltInSample() {
     const engine = engineRef.current
     if (!engine) return
     try {
@@ -444,10 +457,23 @@ export default function App(){
       setHasRayScene(true)
       setHasHybridScene(true)
       setHasModelLoaded(true)
+      setCurrentShape(null)
       setError(null)
     } catch (err) {
+      setCurrentShape('cube')
       setError(`Sample GLTF Error: ${err?.message || String(err)}`)
     }
+  }
+
+  async function handleLoadSample(e) {
+    e.preventDefault()
+    if (backend !== 'webgpu') {
+      pendingSampleLoadRef.current = true
+      setError(null)
+      setBackend('webgpu')
+      return
+    }
+    await loadBuiltInSample()
   }
 
   // Unified asset load: pick the folder containing the model — the loader finds
@@ -914,7 +940,11 @@ export default function App(){
           <div id="file-menu-container" className="menu-container">
             <div className="menu-item" role="button" tabIndex="0" aria-label="File menu">File</div>
             <div className="dropdown-content">
-              <a href="#" onClick={handleLoadSample}>Load Sample Model</a>
+              <a
+                href="#"
+                onClick={handleLoadSample}
+                title={`${SAMPLE_GLTF_MODEL.name} by ${SAMPLE_GLTF_MODEL.creator} · ${SAMPLE_GLTF_MODEL.license} · switches to WebGPU when needed`}
+              >Load {SAMPLE_GLTF_MODEL.name} ({SAMPLE_GLTF_MODEL.license})</a>
               <a href="#" onClick={handleLoadAsset} title={backend === 'webgpu'
                 ? "Select the model's folder — the .gltf or .ply inside loads with its .bin/textures automatically (splat vs mesh detected)."
                 : "Select the model's folder — the .gltf inside loads with its .bin/textures. (Switch to WebGPU for .ply splats/meshes.)"}>Load Asset…</a>

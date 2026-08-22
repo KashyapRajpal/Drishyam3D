@@ -113,7 +113,16 @@ The editor is divided into three main panels and a top menu bar.
 ### Menu Bar
 
 *   **File Menu**:
-    *   `Load Sample Model`: Loads a textured cube GLTF model from the web for quick testing.
+    *   `Load Chronograph Watch (CC BY 4.0)`: Loads the
+        [Khronos Chronograph Watch](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/ChronographWatch)
+        external-file glTF for a realistic multi-mesh sample and ray-traced-shadow stress case.
+        The app switches to WebGPU automatically because the legacy WebGL path renders only one
+        glTF primitive, while this asset contains 19.
+        The model and textures are by Eric Chadwick / Darmstadt Graphics Group GmbH and are
+        used under [CC BY 4.0 and the accompanying logo terms](https://github.com/KhronosGroup/glTF-Sample-Assets/blob/main/Models/ChronographWatch/LICENSE.md).
+        Geometry, base-color textures, and hybrid shadows load today; transmission, material
+        variants, texture transforms, glTF animation, and full normal/ORM PBR shading are not
+        yet represented faithfully.
     *   `Load Asset…`: Opens a **folder picker** and loads the model inside it (see
         [Asset folder convention](#asset-folder-convention)). The format is detected automatically:
         a `.gltf` (with its `.bin`/textures) on either backend, or a `.ply` on **WebGPU** — which is
