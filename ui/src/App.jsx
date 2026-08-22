@@ -285,8 +285,17 @@ export default function App(){
       engineRef.current = engine
       rayCoordinatorRef.current?.setRasterEngine(engine)
 
-      // Expose the engine for the visual-regression harness (?test=1 only).
-      if (isVisualTest) window.__DRISHYAM_ENGINE = engine
+      // Expose test surfaces only for the visual-regression harness. The ray
+      // helper is dynamically imported so its CPU oracle stays out of normal loads.
+      if (isVisualTest) {
+        const { createRayVisualTestApi } = await import('@engine/raytracing/visual-test-api.js')
+        if (cancelled) return
+        window.__DRISHYAM_ENGINE = engine
+        window.__DRISHYAM_RAY_TEST = createRayVisualTestApi({
+          engine,
+          coordinator: rayCoordinatorRef.current,
+        })
+      }
 
       setupSettings((k,v)=>{})
       geometryFactoryRef.current = backend === 'webgpu'
@@ -310,6 +319,10 @@ export default function App(){
           try { engineRef.current.destroy() } catch (e) { /* ignore */ }
         }
         engineRef.current = null
+      }
+      if (isVisualTest) {
+        delete window.__DRISHYAM_ENGINE
+        delete window.__DRISHYAM_RAY_TEST
       }
       rayCoordinatorRef.current?.setRasterEngine(null)
       geometryFactoryRef.current = null
