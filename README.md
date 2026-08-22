@@ -9,6 +9,8 @@ Drishyam3D is a lightweight, browser-based 3D scene editor built with **WebGPU**
 ## Features
 
 *   **Dual Rendering Backends**: Choose between **WebGL** or **WebGPU** in Settings for high-performance rendering with modern GPU capabilities.
+*   **CPU and GPU Path Tracing**: Render the procedural Cornell Box or retained glTF geometry progressively, with live SPP, bounce, sampling, pause, and reset controls.
+*   **Hybrid Ray-Traced Shadows**: Keep WebGPU raster primary visibility while tracing real-time hard shadows for glTF objects, with directional/point light controls and BLAS/TLAS timing stats.
 *   **Triangle-Based Rendering**: Render meshes, glTF models, and procedural shapes with full shader control.
 *   **3D Gaussian Splatting**: Load and render `.ply` scenes captured with neural rendering techniques. Includes GPU-accelerated bitonic depth sorting and optional debug visualization modes.
 *   **Flexible Model Import**: Import GLTF models from local files (including `.zip` archives or entire directories) or load a sample model directly from the web.
@@ -19,6 +21,7 @@ Drishyam3D is a lightweight, browser-based 3D scene editor built with **WebGPU**
 *   **Real-time Reload**: Instantly apply your shader and script changes with the **Apply** button.
 *   **Error Console**: Displays compilation and runtime errors from your code to help with debugging.
 *   **Clean, Resizable UI**: A modern React-based layout with tabbed editors and responsive panels.
+*   **Planned Chronograph Material Fidelity (post-MVP)**: Transmission, normal and ORM maps, material variants, texture transforms, and glTF animation are a separate follow-up feature rather than part of the ray-tracing MVP.
 
 ## Screenshots & Demo
 

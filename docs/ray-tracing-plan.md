@@ -1456,7 +1456,7 @@ Implementation status:
 | RT-015A | Complete | `979e7bd`, `c0a11e6`; three-pass/BLAS-reuse tests, 40-suite/293-test Jest gate, UI build, and Chrome glTF hard-shadow validation |
 | RT-016 | Complete | `c310f73`, `10d9c4d`, `1c4f555`, `72bcb76`; retained Cornell/glTF handoff, full mode sequence, stale-load protection, resize, lifecycle/asset ownership tests, full Jest suite |
 | RT-016A | Complete | `afa4616`; UI build plus Chrome CPU↔raster smoke test with separate canvases |
-| RT-017 | In progress | `afa4616`, `2bd7fba`, `f506eee`, `fa6adb2`; all four modes, pause/reset, capability reasons, and hybrid timings exposed; sampling/light controls remain |
+| RT-017 | Complete | `afa4616`, `2bd7fba`, `f506eee`, `fa6adb2`, `a390e9f`, `de6ab12`, `523dda4`; all four modes, capability reasons, live SPP, bounded bounce/samples-per-frame settings, separate progressive/live-scene pause labels, paused reset, hybrid directional/point light controls, hard-shadow capability messaging, and extended stats; 43-suite/305-test Jest gate, production UI build, Chrome CPU/hybrid UI smoke test, all ray cases, and all nine unchanged splat cases |
 | RT-018 | Complete | `4f69943`; generated glTF fixture, worker CPU/GPU Cornell captures, reset capture, linear RMSE/SSIM gate, hybrid shadow capture, adapter report, unchanged splat cases |
 
 Split this row as packets begin. Use only `Not started`, `In progress`, `Blocked`, or
@@ -1534,6 +1534,31 @@ GIF showing raster -> GPU ray tracing -> hybrid shadows, including at least one 
 that demonstrates the shadow update. State the current fidelity boundary in the PR:
 geometry and base-color textures work, while transmission, material variants, texture
 transforms, animation, and full normal/ORM PBR shading are follow-up work.
+
+### Post-MVP Chronograph feature list
+
+Keep Chronograph material fidelity as its own follow-up effort; it does not reopen the
+ray-tracing MVP packets. Decompose it into bounded parser, upload, shading, and animation
+packets before implementation:
+
+- transmission material support;
+- tangent-space normal maps and occlusion/roughness/metallic (ORM) maps;
+- `KHR_materials_variants` selection and editor controls;
+- `KHR_texture_transform` UV transforms;
+- glTF animation playback and explicit animation/accumulation convergence policy.
+
+Each item needs a small fixture in addition to the Chronograph integration checkpoint so
+parser and renderer correctness do not depend on one large remote asset.
+
+RT-017 completion checkpoint (2026-08-22): Chrome exercised the actual editor controls
+for CPU Cornell sampling, paused accumulation reset/resume, hybrid directional-to-point
+light switching, intensity changes, and the hard/soft-shadow capability boundary without
+page, worker, or WebGPU errors. Local screenshots are available at
+`/tmp/ray-controls-cpu.png` and `/tmp/ray-controls-hybrid.png`; regenerate and attach small
+equivalents to the PR rather than committing them. `npm test -- --runInBand` passed all 43
+suites and 305 tests, `npm --prefix ui run build` passed, `npm run visual:ray` passed both
+numerical parity cases and all five captures, and `npm run visual:splat` passed all nine
+unchanged splat cases with zero pixel drift.
 
 ## Implementation phases
 
@@ -1676,6 +1701,8 @@ scene, and return to raster mode without a reload or resource accumulation.
 
 ### Phase 6 — Quality and performance follow-ups
 
+- Chronograph material fidelity as separate packets: transmission, tangent-space normal
+  and ORM maps, material variants, texture transforms, and animation playback.
 - Texture atlas or bindless-emulation strategy for multiple glTF base-color textures.
 - Metallic-roughness BRDF, emissive glTF materials, environment lighting, MIS, and
   physically based tone mapping.
