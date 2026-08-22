@@ -15,6 +15,12 @@ function mockCanvas() {
 }
 
 describe('CPU ray facade', () => {
+  test('requires the environment-specific worker factory explicitly', async () => {
+    await expect(initCpuRayEngine({ canvas: mockCanvas() })).rejects.toThrow(
+      'CPU ray engine requires a workerFactory supplied by the browser entry point.',
+    );
+  });
+
   test('loads Cornell, presents tiles, resizes, and destroys idempotently', async () => {
     const canvas = mockCanvas();
     let callbacks;
@@ -22,12 +28,14 @@ describe('CPU ray facade', () => {
       initialize: jest.fn(), render: jest.fn(), reset: jest.fn(), pause: jest.fn(),
       getStats: jest.fn(() => ({ spp: 2 })), destroy: jest.fn(),
     };
+    const workerFactory = jest.fn();
     const engine = await initCpuRayEngine({
       canvas,
-      workerFactory: jest.fn(),
+      workerFactory,
       controllerFactory: (options) => { callbacks = options; return controller; },
       settings: { resolutionScale: 1, maxDimension: 256 },
     });
+    expect(callbacks.workerFactory).toBe(workerFactory);
     const scene = engine.loadCornellBox();
     expect(scene.instances).toHaveLength(8);
     expect(controller.initialize).toHaveBeenCalledTimes(1);

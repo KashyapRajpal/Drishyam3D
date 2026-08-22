@@ -6,6 +6,7 @@ import 'codemirror/mode/javascript/javascript'
 import 'codemirror/mode/clike/clike'
 import { initEngine } from '@engine/app-facade.js'
 import { initCpuRayEngine } from '@engine/cpu-ray-facade.js'
+import { createCpuRayWorker } from '@engine/raytracing/cpu/cpu-ray-worker-client.js'
 import { createRayTracingCoordinator } from '@engine/raytracing-coordinator.js'
 import { createDefaultCube, createDefaultTexturedCube, createSphere, createTexturedSphere } from '@engine/geometry.js'
 import { createWebGPUGeometryFactory } from '@engine/webgpu-facade.js'
@@ -46,6 +47,13 @@ const defaultVertPath = Object.keys(shaderFiles).find((p) => p.endsWith('default
 const defaultFragPath = Object.keys(shaderFiles).find((p) => p.endsWith('default.frag'))
 const defaultWgslPath = Object.keys(shaderFiles).find((p) => p.endsWith('default.wgsl'))
 const sceneScriptPath = Object.keys(sceneFiles).find((p) => p.endsWith('scene-script.js'))
+
+// Keep CPU engine creation lazy, but let Vite see the worker factory in the
+// static UI graph. Otherwise the facade's environment-neutral fallback becomes
+// a runtime `/@fs/…` dynamic import in dev and can fail before the worker starts.
+function initBundledCpuRayEngine(options) {
+  return initCpuRayEngine({ ...options, workerFactory: createCpuRayWorker })
+}
 
 function normalizePath(p) {
   return p.replace(/^\.\.\/\.\.\//, '')
@@ -231,7 +239,7 @@ export default function App(){
     if (!cpuCanvasRef.current) return
     const coordinator = createRayTracingCoordinator({
       cpuCanvas: cpuCanvasRef.current,
-      cpuFactory: initCpuRayEngine,
+      cpuFactory: initBundledCpuRayEngine,
       onModeChange: setRenderMode,
       onError: (err) => setError(err?.message || String(err)),
     })

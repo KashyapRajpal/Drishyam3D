@@ -57,10 +57,8 @@ export async function initCpuRayEngine({
     if (!canvas) throw new Error('CPU ray engine requires a canvas.');
     const context = canvas.getContext('2d', { alpha: false });
     if (!context) throw new Error('Unable to initialize a 2D canvas for CPU ray tracing.');
-    let resolvedWorkerFactory = workerFactory;
-    if (!resolvedWorkerFactory) {
-        const workerClient = await import('./raytracing/cpu/cpu-ray-worker-client.js');
-        resolvedWorkerFactory = workerClient.createCpuRayWorker;
+    if (typeof workerFactory !== 'function') {
+        throw new Error('CPU ray engine requires a workerFactory supplied by the browser entry point.');
     }
 
     let destroyed = false;
@@ -76,7 +74,7 @@ export async function initCpuRayEngine({
     const camera = new Camera(canvas, [0, 1, 3.2]);
 
     const controller = controllerFactory({
-        workerFactory: resolvedWorkerFactory,
+        workerFactory,
         presentTile(message) {
             if (destroyed) return;
             const rgba = new Uint8ClampedArray(message.rgbaBuffer);
