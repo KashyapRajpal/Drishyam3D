@@ -1513,6 +1513,28 @@ uses `npm run visual:ray`. The original `visual/cases.mjs` splat matrix and
 and `300` tests, the production UI build, all five ray visual cases, both numerical parity
 cases, and all nine unchanged splat visual cases.
 
+Chronograph Watch sample checkpoint (2026-08-21): commit `b11b813` replaced the built-in
+textured cube with the Khronos
+[Chronograph Watch](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/ChronographWatch)
+external-file glTF. The menu action automatically moves a WebGL session to WebGPU before
+loading because the legacy WebGL drawable path renders only one primitive; the WebGPU path
+loaded all `19` primitives (`100,002` triangles), built the ray scene, and enabled GPU ray
+tracing and hybrid-shadow modes. The external `.gltf` distribution is intentional: the
+current loader rejects the equivalent GLB's bufferView-embedded PNG images. Attribution is
+required under the asset's
+[CC BY 4.0 license and accompanying logo terms](https://github.com/KhronosGroup/glTF-Sample-Assets/blob/main/Models/ChronographWatch/LICENSE.md).
+
+The Chrome smoke test started on the default WebGL backend, selected
+`File -> Load Chronograph Watch (CC BY 4.0)`, observed the automatic WebGPU transition,
+and completed without an error banner, page/console error, or WebGPU validation error.
+The production UI build and all `42` Jest suites (`301` tests) passed. A local raster
+capture is available at `/tmp/ChronographWatch-ui.png`; attach a fresh equivalent capture
+to the PR rather than committing the temporary file. Also record a short, tightly cropped
+GIF showing raster -> GPU ray tracing -> hybrid shadows, including at least one camera move
+that demonstrates the shadow update. State the current fidelity boundary in the PR:
+geometry and base-color textures work, while transmission, material variants, texture
+transforms, animation, and full normal/ORM PBR shading are follow-up work.
+
 ## Implementation phases
 
 ### Phase 0 — Lock scope and measurements
