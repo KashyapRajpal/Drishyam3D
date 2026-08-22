@@ -49,8 +49,8 @@ const defaultWgslPath = Object.keys(shaderFiles).find((p) => p.endsWith('default
 const sceneScriptPath = Object.keys(sceneFiles).find((p) => p.endsWith('scene-script.js'))
 
 // Keep CPU engine creation lazy, but let Vite see the worker factory in the
-// static UI graph. Otherwise the facade's environment-neutral fallback becomes
-// a runtime `/@fs/…` dynamic import in dev and can fail before the worker starts.
+// static UI graph. The dev configuration keeps Vite's internal `/@fs/` worker
+// routes at the server root; production still receives the GitHub Pages base.
 function initBundledCpuRayEngine(options) {
   return initCpuRayEngine({ ...options, workerFactory: createCpuRayWorker })
 }
