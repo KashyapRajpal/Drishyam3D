@@ -160,6 +160,94 @@ body,html,#root{height:100%;margin:0}
 	user-select: none;
 }
 
+.ray-controls-panel {
+	min-width: 292px;
+}
+
+.ray-control-row,
+.ray-slider-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 12px;
+	font-size: 0.82em;
+}
+
+.ray-control-label,
+.ray-slider-row > span:first-child {
+	width: 84px;
+	flex-shrink: 0;
+	opacity: 0.72;
+}
+
+.ray-choice-group {
+	display: flex;
+	gap: 4px;
+	flex-wrap: wrap;
+}
+
+.ray-choice {
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 4px;
+	background: transparent;
+	color: #b9c7df;
+	padding: 3px 6px;
+	cursor: pointer;
+}
+
+.ray-choice:hover:not(:disabled),
+.ray-choice.selected {
+	background: rgba(120, 160, 255, 0.18);
+	color: #fff;
+}
+
+.ray-choice.selected {
+	font-weight: 700;
+	border-color: rgba(120, 160, 255, 0.35);
+}
+
+.ray-choice:disabled {
+	opacity: 0.35;
+	cursor: not-allowed;
+}
+
+.ray-readout,
+.ray-slider-row output {
+	color: #9cf;
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.ray-slider-row input[type='range'] {
+	width: 128px;
+	accent-color: #78a0ff;
+}
+
+.ray-slider-row output {
+	width: 28px;
+	text-align: right;
+}
+
+.ray-control-caption {
+	padding: 5px 12px 2px;
+	font-size: 0.76em;
+	opacity: 0.55;
+	user-select: none;
+}
+
+.ray-vector-control .ray-slider-row {
+	padding-top: 1px;
+	padding-bottom: 1px;
+}
+
+.ray-vector-control .ray-slider-row > span:first-child {
+	width: 12px;
+}
+
+.ray-intensity-row {
+	padding-top: 6px;
+	padding-bottom: 6px;
+}
+
 .menu-container:hover > .dropdown-content {
 	display: block;
 }

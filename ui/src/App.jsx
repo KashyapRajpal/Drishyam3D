@@ -37,6 +37,12 @@ import {
 } from '@engine/scene-ops.js'
 import { ViewportCanvases } from './components/ViewportCanvases.jsx'
 import { RayTracingControls } from './components/RayTracingControls.jsx'
+import {
+  DEFAULT_HYBRID_LIGHT,
+  DEFAULT_RAY_TRACING_SETTINGS,
+  mergeHybridLight,
+  mergeRayTracingSettings,
+} from './ray-control-state.js'
 
 const shaderFiles = import.meta.glob('../../assets/shaders/**/*.{vert,frag,glsl,wgsl}', { query: '?raw', import: 'default' })
 const engineFiles = import.meta.glob('../../scripts/engine/**/*.js', { query: '?raw', import: 'default' })
@@ -213,6 +219,8 @@ export default function App(){
   const [hasRayScene, setHasRayScene] = useState(false)
   const [hasHybridScene, setHasHybridScene] = useState(false)
   const [rayPaused, setRayPaused] = useState(false)
+  const [raySettings, setRaySettings] = useState(() => mergeRayTracingSettings(DEFAULT_RAY_TRACING_SETTINGS))
+  const [hybridLight, setHybridLight] = useState(() => mergeHybridLight(DEFAULT_HYBRID_LIGHT))
   const [error, setError] = useState(null)
   const [textured, setTextured] = useState(false)
   const [currentShape, setCurrentShape] = useState('cube')
@@ -414,9 +422,10 @@ export default function App(){
     }
   }, [engineReady, flipSplatY, splatLoaded])
 
-  // Poll stats when visible.
+  // Progressive controls always need the current SPP; the full overlay remains opt-in.
   useEffect(() => {
-    if (!showStats || !engineReady) return
+    const progressive = renderMode === 'raytrace-cpu' || renderMode === 'raytrace-gpu'
+    if ((!showStats && !progressive) || !engineReady) return
     const engine = renderMode === 'raytrace-cpu' ? rayCoordinatorRef.current : engineRef.current
     const timer = setInterval(() => {
       if (engine && typeof engine.getStats === 'function') {
@@ -425,6 +434,27 @@ export default function App(){
     }, 200)
     return () => clearInterval(timer)
   }, [showStats, engineReady, renderMode])
+
+  // Reapply UI-owned settings after lazy CPU creation and WebGPU backend changes.
+  useEffect(() => {
+    if (!engineReady || (renderMode !== 'raytrace-cpu' && renderMode !== 'raytrace-gpu')) return
+    try {
+      rayCoordinatorRef.current?.setRayTracingSettings(raySettings)
+      setError(null)
+    } catch (err) {
+      setError(`Ray Tracing Settings Error: ${err?.message || String(err)}`)
+    }
+  }, [engineReady, renderMode, raySettings])
+
+  useEffect(() => {
+    if (!engineReady || backend !== 'webgpu') return
+    try {
+      rayCoordinatorRef.current?.setLight(hybridLight)
+      setError(null)
+    } catch (err) {
+      setError(`Hybrid Light Error: ${err?.message || String(err)}`)
+    }
+  }, [engineReady, backend, hybridLight])
 
   // Drive the current shape from React state. Reacts to shape/textured/engine changes.
   useEffect(() => {
@@ -600,8 +630,10 @@ export default function App(){
   async function selectRasterBackend(e, nextBackend) {
     e.preventDefault()
     try {
+      if (rayPaused) rayCoordinatorRef.current?.resume()
       await rayCoordinatorRef.current?.setRenderMode('raster')
       setBackend(nextBackend)
+      setRayPaused(false)
       setError(null)
     } catch (err) {
       setError(err?.message || String(err))
@@ -612,6 +644,7 @@ export default function App(){
     const coordinator = rayCoordinatorRef.current
     if (!coordinator) return
     try {
+      if (rayPaused) coordinator.resume()
       await coordinator.setRenderMode(nextMode)
       setRayPaused(false)
       setError(null)
@@ -630,6 +663,14 @@ export default function App(){
 
   function resetRayAccumulation() {
     rayCoordinatorRef.current?.resetAccumulation()
+  }
+
+  function updateRayTracingSettings(partial) {
+    setRaySettings((current) => mergeRayTracingSettings(current, partial))
+  }
+
+  function updateHybridLight(partial) {
+    setHybridLight((current) => mergeHybridLight(current, partial))
   }
 
   // Handlers to apply edits
@@ -1000,9 +1041,14 @@ export default function App(){
                 hasHybridScene={hasHybridScene}
                 capabilities={rayCoordinatorRef.current?.getCapabilities?.() || {}}
                 paused={rayPaused}
+                spp={stats?.renderMode === renderMode ? stats.spp || 0 : 0}
+                raySettings={raySettings}
+                hybridLight={hybridLight}
                 onSelectMode={selectRayRenderMode}
                 onTogglePause={toggleRayPause}
                 onResetAccumulation={resetRayAccumulation}
+                onChangeRaySettings={updateRayTracingSettings}
+                onChangeHybridLight={updateHybridLight}
               />
               {splatLoaded && (
                 <>
