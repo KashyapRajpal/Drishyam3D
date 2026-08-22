@@ -488,6 +488,8 @@ fn cs_raytrace(@builtin(global_invocation_id) invocation : vec3<u32>) {
     var batchSampleSum = vec3<f32>(0.0);
     for (var sampleOffset = 0u; sampleOffset < batchSampleCount; sampleOffset += 1u) {
         let globalSampleIndex = frame.dimensions.z + sampleOffset;
+        // Shared with pixelSampleSeed() in core/random.js. Do not change one
+        // implementation without updating the deterministic parity contract.
         var rng = frame.dimensions.w
             ^ (pixel.x * 0x9e3779b9u)
             ^ (pixel.y * 0x85ebca6bu)

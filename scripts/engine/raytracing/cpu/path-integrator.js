@@ -93,8 +93,9 @@ export function sampleRectLight(light, rngState) {
 export function estimateDirectLighting(hit, material, scene, acceleration, rngState, epsilon, rayCounter) {
     const lights = (scene.lights || []).filter((light) => light.type === 'rect');
     if (lights.length === 0) return [0, 0, 0];
-    const lightIndex = Math.min(lights.length - 1, Math.floor(nextFloat(rngState) * lights.length));
-    const light = lights[lightIndex];
+    // The MVP GPU scene layout carries one rectangular light. Using the first
+    // light here keeps the CPU oracle on the exact same random-number stream.
+    const light = lights[0];
     const sample = sampleRectLight(light, rngState);
     if (!sample) return [0, 0, 0];
     const toLight = subtract(sample.position, hit.position);
@@ -117,9 +118,7 @@ export function estimateDirectLighting(hit, material, scene, acceleration, rngSt
     }
     const emitted = scale(light.color || [1, 1, 1], light.intensity ?? 1);
     const geometryOverPdf = surfaceCosine * lightCosine * sample.area / distanceSquared;
-    return scale(multiply(material.baseColor.slice(0, 3), emitted), (
-        geometryOverPdf * lights.length / PI
-    ));
+    return scale(multiply(material.baseColor.slice(0, 3), emitted), geometryOverPdf / PI);
 }
 
 /** Pure single-path sample. All stochastic state is supplied by the caller. */

@@ -1,5 +1,5 @@
 import { generateCameraRay } from '../core/camera-rays.js';
-import { createRng, nextFloat } from '../core/random.js';
+import { createRng, nextFloat, pixelSampleSeed } from '../core/random.js';
 import { linearRgbToRgba8, traceSample } from './path-integrator.js';
 
 let generation = -1;
@@ -26,14 +26,6 @@ function resetAccumulation(width = 0, height = 0) {
     accumulationHeight = height;
     accumulation = new Float32Array(width * height * 3);
     spp = 0;
-}
-
-function sampleSeed(baseSeed, pixelIndex, sampleIndex) {
-    let value = (baseSeed ^ Math.imul(pixelIndex + 1, 0x9e3779b1)
-        ^ Math.imul(sampleIndex + 1, 0x85ebca6b)) >>> 0;
-    value = Math.imul(value ^ (value >>> 16), 0x7feb352d) >>> 0;
-    value = Math.imul(value ^ (value >>> 15), 0x846ca68b) >>> 0;
-    return (value ^ (value >>> 16)) >>> 0;
 }
 
 function yieldToMessages() {
@@ -72,7 +64,9 @@ async function renderPass(message) {
                     const accumulationOffset = pixelIndex * 3;
                     for (let batchSample = 0; batchSample < samplesPerFrame; batchSample += 1) {
                         const sampleIndex = spp + batchSample;
-                        const rng = createRng(sampleSeed(settings.seed ?? 0x12345678, pixelIndex, sampleIndex));
+                        const rng = createRng(pixelSampleSeed(
+                            settings.seed ?? 0x12345678, x, y, sampleIndex,
+                        ));
                         const ray = generateCameraRay(
                             cameraFrame, x, y, width, height, [nextFloat(rng), nextFloat(rng)],
                         );

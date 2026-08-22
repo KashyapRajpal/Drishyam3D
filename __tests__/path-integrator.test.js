@@ -1,6 +1,12 @@
 import { createIdentityMatrix } from '../scripts/engine/matrix.js';
 import { buildAccelerationStructures } from '../scripts/engine/raytracing/acceleration/acceleration-structure.js';
-import { createRng, nextFloat, nextUint32, ZERO_SEED_FALLBACK } from '../scripts/engine/raytracing/core/random.js';
+import {
+  createRng,
+  nextFloat,
+  nextUint32,
+  pixelSampleSeed,
+  ZERO_SEED_FALLBACK,
+} from '../scripts/engine/raytracing/core/random.js';
 import { prepareRayScene } from '../scripts/engine/raytracing/core/ray-scene.js';
 import {
   linearRgbToRgba8,
@@ -59,6 +65,23 @@ describe('seeded CPU path integrator', () => {
     const uniform = nextFloat(createRng(0x12345678));
     expect(uniform).toBeGreaterThanOrEqual(0);
     expect(uniform).toBeLessThan(1);
+  });
+
+  test('derives the WGSL-compatible pixel/sample seed vector', () => {
+    expect([
+      pixelSampleSeed(0x12345678, 0, 0, 0),
+      pixelSampleSeed(0x12345678, 1, 0, 0),
+      pixelSampleSeed(0x12345678, 0, 1, 0),
+      pixelSampleSeed(0x12345678, 0, 0, 1),
+      pixelSampleSeed(0x12345678, 31, 17, 63),
+    ]).toEqual([
+      0x12345678,
+      0x8c032fc1,
+      0x97df9c13,
+      0xd086f84d,
+      0x37d3450f,
+    ]);
+    expect(() => pixelSampleSeed(1, 0.5, 0, 0)).toThrow(/integers/);
   });
 
   test('returns the environment on a miss', () => {

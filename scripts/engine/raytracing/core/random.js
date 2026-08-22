@@ -1,5 +1,25 @@
 export const ZERO_SEED_FALLBACK = 0x6d2b79f5;
 
+const PIXEL_X_SEED_MULTIPLIER = 0x9e3779b9;
+const PIXEL_Y_SEED_MULTIPLIER = 0x85ebca6b;
+const SAMPLE_SEED_MULTIPLIER = 0xc2b2ae35;
+
+/**
+ * Derives the per-path seed shared by the CPU worker and the WGSL integrator.
+ * Keep these multipliers in sync with cs_raytrace in raytrace.wgsl.
+ */
+export function pixelSampleSeed(baseSeed, pixelX, pixelY, sampleIndex) {
+    if (![baseSeed, pixelX, pixelY, sampleIndex].every(Number.isInteger)) {
+        throw new Error('Pixel sample seed inputs must be integers.');
+    }
+    return (
+        (baseSeed >>> 0)
+        ^ Math.imul(pixelX >>> 0, PIXEL_X_SEED_MULTIPLIER)
+        ^ Math.imul(pixelY >>> 0, PIXEL_Y_SEED_MULTIPLIER)
+        ^ Math.imul(sampleIndex >>> 0, SAMPLE_SEED_MULTIPLIER)
+    ) >>> 0;
+}
+
 /** Explicit mutable RNG state. Keep one state object per sample stream. */
 export function createRng(seed) {
     if (!Number.isFinite(seed)) throw new Error('RNG seed must be finite.');
