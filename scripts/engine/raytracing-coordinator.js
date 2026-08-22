@@ -224,7 +224,11 @@ export function createRayTracingCoordinator({ cpuCanvas, cpuFactory, onModeChang
                 requireRetainedScene();
                 await leaveGpuPresentation(nextMode);
                 const cpu = await loadCpuAsset();
-                copyCameraState(rasterEngine?.camera, cpu.camera);
+                // Procedural/reference scenes such as Cornell carry an authored
+                // camera which loadRayScene has already applied. Imported glTF
+                // scenes do not, so they inherit the interactive raster view.
+                const sceneHasCamera = !!requireRetainedScene().preparedRayScene?.camera;
+                if (!sceneHasCamera) copyCameraState(rasterEngine?.camera, cpu.camera);
                 rasterEngine?.scene?.pause?.();
                 cpu.resume?.();
             } else if (nextMode === 'raytrace-gpu') {

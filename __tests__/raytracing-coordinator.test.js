@@ -20,12 +20,19 @@ describe('ray tracing coordinator', () => {
   afterAll(() => { global.Worker = OriginalWorker; });
 
   test('switches one presentation loop and retains the CPU scene', async () => {
+    const rasterPose = { target: [0, 0, 0], zoom: 5 };
     const raster = {
+      camera: { getState: jest.fn(() => rasterPose), setState: jest.fn() },
       scene: { pause: jest.fn(), resume: jest.fn() },
       getStats: jest.fn(() => ({ backend: 'webgl' })),
     };
+    const cornellScene = {
+      name: 'Cornell',
+      camera: { eye: [0, 1, 3.2], target: [0, 1, 0], up: [0, 1, 0] },
+    };
     const cpu = {
-      loadCornellBox: jest.fn(() => ({ name: 'Cornell' })),
+      camera: { getState: jest.fn(() => ({ target: [0, 1, 0], zoom: 3.2 })), setState: jest.fn() },
+      loadCornellBox: jest.fn(() => cornellScene),
       resume: jest.fn(), pause: jest.fn(), destroy: jest.fn(),
       getStats: jest.fn(() => ({ backend: 'cpu', spp: 3 })),
     };
@@ -38,6 +45,7 @@ describe('ray tracing coordinator', () => {
     await coordinator.setRenderMode('raytrace-cpu');
     expect(raster.scene.pause).toHaveBeenCalledTimes(1);
     expect(cpu.resume).toHaveBeenCalledTimes(1);
+    expect(cpu.camera.setState).not.toHaveBeenCalled();
     expect(coordinator.getStats()).toEqual({ backend: 'cpu', spp: 3 });
     await coordinator.setRenderMode('raster');
     expect(cpu.pause).toHaveBeenCalledTimes(1);
