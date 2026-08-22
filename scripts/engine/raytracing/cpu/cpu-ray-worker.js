@@ -72,6 +72,7 @@ async function renderPass(message) {
                         );
                         const color = traceSample(ray, preparedScene, acceleration, rng, {
                             maxBounces: settings.maxBounces,
+                            environmentIntensity: settings.environmentIntensity,
                             shouldCancel: isCancelled,
                             rayCounter,
                         });

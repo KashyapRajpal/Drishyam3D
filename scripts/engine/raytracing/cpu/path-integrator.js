@@ -137,7 +137,10 @@ export function traceSample(initialRay, scene, acceleration, rngState, settings 
         if (settings.rayCounter) settings.rayCounter.count += 1;
         const hit = intersectTlas(ray, scene, acceleration, epsilon, Infinity);
         if (!hit) {
-            radiance = add(radiance, multiply(throughput, scene.environment?.color || [0, 0, 0]));
+            radiance = add(radiance, scale(
+                multiply(throughput, scene.environment?.color || [0, 0, 0]),
+                settings.environmentIntensity ?? 1,
+            ));
             break;
         }
         const material = scene.materials[hit.materialIndex] || {};
