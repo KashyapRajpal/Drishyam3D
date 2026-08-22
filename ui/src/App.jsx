@@ -435,17 +435,6 @@ export default function App(){
     return () => clearInterval(timer)
   }, [showStats, engineReady, renderMode])
 
-  // Reapply UI-owned settings after lazy CPU creation and WebGPU backend changes.
-  useEffect(() => {
-    if (!engineReady || (renderMode !== 'raytrace-cpu' && renderMode !== 'raytrace-gpu')) return
-    try {
-      rayCoordinatorRef.current?.setRayTracingSettings(raySettings)
-      setError(null)
-    } catch (err) {
-      setError(`Ray Tracing Settings Error: ${err?.message || String(err)}`)
-    }
-  }, [engineReady, renderMode, raySettings])
-
   useEffect(() => {
     if (!engineReady || backend !== 'webgpu') return
     try {
@@ -595,6 +584,7 @@ export default function App(){
     try {
       await coordinator.loadCornellBox()
       await coordinator.setRenderMode('raytrace-cpu')
+      coordinator.setRayTracingSettings(raySettings)
       setHasModelLoaded(true)
       setSplatLoaded(false)
       setCurrentShape(null)
@@ -615,6 +605,7 @@ export default function App(){
       if (backend !== 'webgpu') throw new Error('Switch to WebGPU before starting GPU ray tracing.')
       await coordinator.loadCornellBox('raytrace-gpu')
       await coordinator.setRenderMode('raytrace-gpu')
+      coordinator.setRayTracingSettings(raySettings)
       setHasModelLoaded(true)
       setSplatLoaded(false)
       setCurrentShape(null)
@@ -646,6 +637,11 @@ export default function App(){
     try {
       if (rayPaused) coordinator.resume()
       await coordinator.setRenderMode(nextMode)
+      if (nextMode === 'raytrace-cpu' || nextMode === 'raytrace-gpu') {
+        coordinator.setRayTracingSettings(raySettings)
+      } else if (nextMode === 'hybrid-shadows') {
+        coordinator.setLight(hybridLight)
+      }
       setRayPaused(false)
       setError(null)
     } catch (err) {
@@ -666,7 +662,14 @@ export default function App(){
   }
 
   function updateRayTracingSettings(partial) {
-    setRaySettings((current) => mergeRayTracingSettings(current, partial))
+    const next = mergeRayTracingSettings(raySettings, partial)
+    try {
+      rayCoordinatorRef.current?.setRayTracingSettings(next)
+      setRaySettings(next)
+      setError(null)
+    } catch (err) {
+      setError(`Ray Tracing Settings Error: ${err?.message || String(err)}`)
+    }
   }
 
   function updateHybridLight(partial) {
