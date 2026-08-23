@@ -8,16 +8,12 @@ const MODES = [
   { value: 'hybrid-shadows', label: 'Hybrid ray-traced shadows', webgpu: true },
 ]
 
-function unavailableReason(mode, { backend, hasRayScene, hasHybridScene, capabilities }) {
-  if (mode.value === 'raster') return null
-  if (mode.webgpu && backend !== 'webgpu') return 'Switch the raster backend to WebGPU first.'
-  if (mode.value === 'hybrid-shadows' && !hasHybridScene) {
-    return 'Load a ray-traceable glTF raster scene first.'
-  }
-  if (!hasRayScene) return 'Load a ray-traceable glTF or a Cornell Box example first.'
-  const capability = capabilities?.[mode.value]
-  if (capability && !capability.available) return capability.reason || `${mode.label} is unavailable.`
-  return null
+function getModeHint(mode, { backend, hasRayScene, hasHybridScene }) {
+  if (mode.value === 'raster') return 'Standard rasterized rendering'
+  if (mode.webgpu && backend !== 'webgpu') return 'Switches backend to WebGPU and activates ' + mode.label
+  if (mode.value === 'hybrid-shadows' && !hasHybridScene) return 'Loads sample scene and activates hybrid shadows'
+  if (!hasRayScene) return 'Loads Cornell Box example and starts ' + mode.label
+  return `Switch to ${mode.label}`
 }
 
 function ChoiceRow({ label, value, options, onChange }) {
@@ -90,21 +86,21 @@ export function RayTracingControls({
     <>
       <div className="menu-label ray-menu-label">Render Mode</div>
       {MODES.map((mode) => {
-        const reason = unavailableReason(mode, { backend, hasRayScene, hasHybridScene, capabilities })
+        const hint = getModeHint(mode, { backend, hasRayScene, hasHybridScene })
+        const isCurrent = renderMode === mode.value
         return (
           <a
             key={mode.value}
             href="#"
-            className={reason ? 'disabled' : ''}
-            aria-disabled={reason ? 'true' : undefined}
-            title={reason || `Switch to ${mode.label}`}
-            style={renderMode === mode.value ? { fontWeight: 'bold' } : {}}
+            className={isCurrent ? 'active-item' : ''}
+            title={hint}
             onClick={(event) => {
               event.preventDefault()
-              if (!reason) onSelectMode(mode.value)
+              onSelectMode(mode.value)
             }}
           >
-            {mode.label}
+            <span>{mode.label}</span>
+            {isCurrent && <span style={{ color: '#38bdf8' }}>✓</span>}
           </a>
         )
       })}
@@ -131,10 +127,10 @@ export function RayTracingControls({
                 onChange={(samplesPerFrame) => onChangeRaySettings({ samplesPerFrame })}
               />
               <a href="#" onClick={(event) => { event.preventDefault(); onTogglePause() }}>
-                {paused ? 'Resume accumulation' : 'Pause accumulation'}
+                {paused ? '▶ Resume accumulation' : '⏸ Pause accumulation'}
               </a>
               <a href="#" onClick={(event) => { event.preventDefault(); onResetAccumulation() }}>
-                Reset accumulation
+                🔄 Reset accumulation
               </a>
             </div>
           ) : (
@@ -177,23 +173,9 @@ export function RayTracingControls({
                   onChange={(position) => onChangeHybridLight({ position })}
                 />
               )}
-              <div className="ray-control-row">
-                <span className="ray-control-label">Shadow</span>
-                <div className="ray-choice-group">
-                  <button type="button" className="ray-choice selected" aria-pressed="true">Hard</button>
-                  <button
-                    type="button"
-                    className="ray-choice"
-                    disabled
-                    title="Soft shadow sampling is planned after the MVP."
-                  >
-                    Soft · planned
-                  </button>
-                </div>
-              </div>
               <div className="ray-control-caption">Animation + rendering</div>
               <a href="#" onClick={(event) => { event.preventDefault(); onTogglePause() }}>
-                {paused ? 'Resume live scene' : 'Pause live scene'}
+                {paused ? '▶ Resume live scene' : '⏸ Pause live scene'}
               </a>
             </div>
           )}
