@@ -43,7 +43,6 @@ import { TopMenuBar } from './components/TopMenuBar.jsx'
 import { FileExplorer } from './components/FileExplorer.jsx'
 import { CodeEditorPanel } from './components/CodeEditorPanel.jsx'
 import { StatsOverlay } from './components/StatsOverlay.jsx'
-import { CompareSlider } from './components/CompareSlider.jsx'
 import { CommandPalette } from './components/CommandPalette.jsx'
 import { ShortcutsModal } from './components/ShortcutsModal.jsx'
 import { MinimalLegend } from './components/MinimalLegend.jsx'
@@ -100,8 +99,6 @@ export default function App() {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const [compareMode, setCompareMode] = useState(false)
-  const [compareSplit, setCompareSplit] = useState(0.5)
 
   const [hasRayScene, setHasRayScene] = useState(false)
   const [hasHybridScene, setHasHybridScene] = useState(false)
@@ -261,6 +258,17 @@ export default function App() {
       engineRef.current = engine
       rayCoordinatorRef.current?.setRasterEngine(engine)
 
+      if (typeof window !== 'undefined') {
+        window.__DRISHYAM_ENGINE = engine
+        if (isVisualTest) {
+          import('@engine/raytracing/visual-test-api.js').then(({ createRayVisualTestApi }) => {
+            if (!cancelled) {
+              window.__DRISHYAM_RAY_TEST = createRayVisualTestApi({ engine, coordinator: rayCoordinatorRef.current })
+            }
+          }).catch((err) => console.error('Failed to initialize visual test API:', err))
+        }
+      }
+
       setupSettings(() => {})
       geometryFactoryRef.current = backend === 'webgpu'
         ? createWebGPUGeometryFactory(engine.device, logoJpg)
@@ -278,6 +286,10 @@ export default function App() {
 
     return () => {
       cancelled = true
+      if (typeof window !== 'undefined') {
+        if (window.__DRISHYAM_ENGINE === engineRef.current) window.__DRISHYAM_ENGINE = null
+        window.__DRISHYAM_RAY_TEST = null
+      }
       if (engineRef.current) {
         if (typeof engineRef.current.destroy === 'function') {
           try { engineRef.current.destroy() } catch (e) { /* ignore */ }
@@ -733,7 +745,7 @@ export default function App() {
     }
   }
 
-  const commandPaletteActions = useMemo(() => [
+  const commandPaletteActions = [
     { id: 'mode-view', label: 'Switch to Minimal View Mode', category: 'Layout', run: () => setUiMode('view') },
     { id: 'mode-edit', label: 'Switch to Edit Studio Mode', category: 'Layout', run: () => setUiMode('edit') },
     { id: 'cornell-cpu', label: 'Load Cornell Box (CPU Path Tracing)', category: 'Ray Tracing', run: handleLoadCornellBox },
@@ -746,10 +758,9 @@ export default function App() {
     { id: 'backend-gpu', label: 'Switch Renderer to WebGPU', category: 'Engine', run: () => setBackend('webgpu') },
     { id: 'backend-gl', label: 'Switch Renderer to WebGL', category: 'Engine', run: () => setBackend('webgl') },
     { id: 'toggle-stats', label: 'Toggle Real-Time Performance HUD', category: 'View', run: () => setShowStats((s) => !s) },
-    { id: 'toggle-compare', label: 'Toggle Compare Split Slider', category: 'View', run: () => setCompareMode((c) => !c) },
     { id: 'reset-scene', label: 'Reset 3D Scene', category: 'Scene', run: handleResetScene },
     { id: 'help-shortcuts', label: 'View Keyboard Shortcuts', category: 'Help', run: () => setIsShortcutsOpen(true) },
-  ], [backend, hasRayScene, hasHybridScene, activeTabPath, openFiles, fileContents])
+  ]
 
   const visibleShaderFiles = useMemo(() => {
     return Object.fromEntries(
@@ -845,8 +856,6 @@ export default function App() {
           setShowExplorer={setShowExplorer}
           showEditorPanel={showEditorPanel}
           setShowEditorPanel={setShowEditorPanel}
-          compareMode={compareMode}
-          setCompareMode={setCompareMode}
           onLoadSampleModel={handleLoadSample}
           onLoadSampleHybridShadows={handleLoadSampleWithHybridShadows}
           onLoadAssetFolder={handleLoadAssetFolder}
@@ -898,7 +907,6 @@ export default function App() {
             renderMode={renderMode}
           >
             <StatsOverlay stats={stats} showStats={showStats} />
-            <CompareSlider enabled={compareMode} split={compareSplit} onChangeSplit={setCompareSplit} />
           </ViewportCanvases>
         </div>
 

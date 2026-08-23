@@ -200,7 +200,7 @@ export function resolveTextureUrl() {
         baseUrl = window.__DRISHYAM_ASSET('assets/checkerboard-texture.png');
     } else if (typeof location !== 'undefined' && location.href) {
         try {
-            baseUrl = new URL('../assets/checkerboard-texture.png', location.href).toString();
+            baseUrl = new URL('assets/checkerboard-texture.png', location.href).toString();
         } catch (e) {
             // Keep fallback
         }
