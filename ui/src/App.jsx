@@ -459,8 +459,23 @@ export default function App() {
         input.type = 'file'
         input.accept = isWebGPU ? '.ply,.gltf,.bin,image/*' : '.gltf,.bin,image/*'
         input.multiple = true
+        let resolved = false
+        const handleFocus = () => {
+          setTimeout(() => {
+            if (!resolved) {
+              resolved = true
+              window.removeEventListener('focus', handleFocus)
+              resolve([])
+            }
+          }, 500)
+        }
         const files = await new Promise((resolve) => {
-          input.onchange = () => resolve(Array.from(input.files || []))
+          input.onchange = () => {
+            resolved = true
+            window.removeEventListener('focus', handleFocus)
+            resolve(Array.from(input.files || []))
+          }
+          window.addEventListener('focus', handleFocus, { once: true })
           input.click()
         })
         if (!files?.length) return
@@ -634,25 +649,29 @@ export default function App() {
       prev.map((f) => (f.path === path ? { ...f, isDirty: true } : f))
     )
     if (autoRefresh) {
-      handleApply()
+      handleApply(path, val)
     }
   }
 
-  function handleApply() {
+  function handleApply(targetPath = activeTabPath, contentOverride = null) {
     const e = engineRef.current
     if (!e) return setError('Engine not initialized')
 
-    if (activeTabPath.endsWith('.wgsl')) {
-      const ok = e.updateShaders ? e.updateShaders({ wgsl: fileContents[activeTabPath] }) : e.setShaders?.(fileContents[activeTabPath])
+    const getContent = (p) => (p === targetPath && contentOverride !== null ? contentOverride : (fileContents[p] ?? ''))
+
+    if (targetPath.endsWith('.wgsl')) {
+      const ok = e.setShaders?.(getContent(targetPath))
       if (!ok && e.setShaders) setError('Shader compilation failed')
       else setError(null)
-    } else if (activeTabPath.endsWith('.vert') || activeTabPath.endsWith('.frag')) {
-      const ok = e.setShaders?.(fileContents[defaultVertPath], fileContents[defaultFragPath])
+    } else if (targetPath.endsWith('.vert') || targetPath.endsWith('.frag')) {
+      const vertCode = getContent(defaultVertPath)
+      const fragCode = getContent(defaultFragPath)
+      const ok = e.setShaders?.(vertCode, fragCode)
       if (!ok && e.setShaders) setError('Shader compilation failed')
       else setError(null)
-    } else if (activeTabPath.endsWith('.js')) {
-      if (activeTabPath === sceneScriptPath) {
-        const ok = e.setScriptSource?.(fileContents[activeTabPath])
+    } else if (targetPath.endsWith('.js')) {
+      if (targetPath === sceneScriptPath) {
+        const ok = e.setScriptSource?.(getContent(targetPath))
         if (!ok && e.setScriptSource) setError('Script compilation failed')
         else setError(null)
       } else {
@@ -666,6 +685,9 @@ export default function App() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         setIsCommandPaletteOpen((prev) => !prev)
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'o') {
+        e.preventDefault()
+        handleOpenLocalFile()
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
         e.preventDefault()
         handleSaveActiveFile()
@@ -676,7 +698,7 @@ export default function App() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [activeTabPath, fileContents])
+  }, [activeTabPath, openFiles, fileContents])
 
   function toggleFullscreen() {
     if (!document.fullscreenElement) {
@@ -704,7 +726,7 @@ export default function App() {
     { id: 'toggle-compare', label: 'Toggle Compare Split Slider', category: 'View', run: () => setCompareMode((c) => !c) },
     { id: 'reset-scene', label: 'Reset 3D Scene', category: 'Scene', run: handleResetScene },
     { id: 'help-shortcuts', label: 'View Keyboard Shortcuts', category: 'Help', run: () => setIsShortcutsOpen(true) },
-  ], [backend, hasRayScene, hasHybridScene])
+  ], [backend, hasRayScene, hasHybridScene, activeTabPath, openFiles, fileContents])
 
   const visibleShaderFiles = useMemo(() => {
     return Object.fromEntries(

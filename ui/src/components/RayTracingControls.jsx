@@ -86,16 +86,21 @@ export function RayTracingControls({
     <>
       <div className="menu-label ray-menu-label">Render Mode</div>
       {MODES.map((mode) => {
-        const hint = getModeHint(mode, { backend, hasRayScene, hasHybridScene })
+        const capability = capabilities?.[mode.value]
+        const isUnavailable = capability && capability.available === false
+        const hint = isUnavailable
+          ? (capability.reason || 'Mode is unavailable on this device/configuration')
+          : getModeHint(mode, { backend, hasRayScene, hasHybridScene })
         const isCurrent = renderMode === mode.value
         return (
           <a
             key={mode.value}
             href="#"
-            className={isCurrent ? 'active-item' : ''}
+            className={`${isCurrent ? 'active-item' : ''} ${isUnavailable ? 'disabled' : ''}`}
             title={hint}
             onClick={(event) => {
               event.preventDefault()
+              if (isUnavailable) return
               onSelectMode(mode.value)
             }}
           >
