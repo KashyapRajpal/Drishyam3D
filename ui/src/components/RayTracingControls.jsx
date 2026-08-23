@@ -98,6 +98,8 @@ export function RayTracingControls({
             href="#"
             className={`${isCurrent ? 'active-item' : ''} ${isUnavailable ? 'disabled' : ''}`}
             title={hint}
+            aria-disabled={isUnavailable ? 'true' : undefined}
+            tabIndex={isUnavailable ? -1 : 0}
             onClick={(event) => {
               event.preventDefault()
               if (isUnavailable) return

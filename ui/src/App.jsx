@@ -476,17 +476,17 @@ export default function App() {
         input.type = 'file'
         input.accept = isWebGPU ? '.ply,.gltf,.bin,image/*' : '.gltf,.bin,image/*'
         input.multiple = true
-        let resolved = false
-        const handleFocus = () => {
-          setTimeout(() => {
-            if (!resolved) {
-              resolved = true
-              window.removeEventListener('focus', handleFocus)
-              resolve([])
-            }
-          }, 500)
-        }
         const files = await new Promise((resolve) => {
+          let resolved = false
+          const handleFocus = () => {
+            setTimeout(() => {
+              if (!resolved) {
+                resolved = true
+                window.removeEventListener('focus', handleFocus)
+                resolve([])
+              }
+            }, 500)
+          }
           input.onchange = () => {
             resolved = true
             window.removeEventListener('focus', handleFocus)
@@ -652,11 +652,9 @@ export default function App() {
     const content = fileContents[activeTabPath] ?? ''
     try {
       const handle = await saveTextFile(activeFile.handle, content, activeFile.name)
-      if (handle) {
-        setOpenFiles((prev) =>
-          prev.map((f) => (f.path === activeTabPath ? { ...f, handle, isDirty: false } : f))
-        )
-      }
+      setOpenFiles((prev) =>
+        prev.map((f) => (f.path === activeTabPath ? { ...f, handle: handle || f.handle, isDirty: false } : f))
+      )
     } catch (err) {
       setError(`Save File Error: ${err?.message || String(err)}`)
     }
