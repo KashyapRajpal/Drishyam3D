@@ -113,6 +113,8 @@ export async function saveTextFileAs(text, suggestedName = 'shader.wgsl') {
   a.href = url
   a.download = suggestedName
   a.click()
-  URL.revokeObjectURL(url)
+  setTimeout(() => {
+    try { URL.revokeObjectURL(url) } catch (e) { /* ignore */ }
+  }, 1000)
   return null
 }

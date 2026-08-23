@@ -18,8 +18,6 @@ export function TopMenuBar({
   setShowExplorer,
   showEditorPanel,
   setShowEditorPanel,
-  compareMode,
-  setCompareMode,
   onLoadSampleModel,
   onLoadSampleHybridShadows,
   onLoadAssetFolder,
@@ -248,9 +246,6 @@ export function TopMenuBar({
               </a>
               <a href="#" onClick={(e) => { e.preventDefault(); setShowStats(!showStats) }}>
                 {showStats ? '☑️ Performance Stats HUD' : '☐ Performance Stats HUD'}
-              </a>
-              <a href="#" onClick={(e) => { e.preventDefault(); setCompareMode(!compareMode) }}>
-                {compareMode ? '☑️ Compare Split Slider' : '☐ Compare Split Slider'}
               </a>
               <div className="menu-separator" />
               <a href="#" onClick={(e) => { e.preventDefault(); setUiMode('view'); setActiveMenu(null) }}>
