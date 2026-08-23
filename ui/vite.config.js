@@ -7,6 +7,9 @@ export default defineConfig(({ command, isPreview }) => ({
   // during development. Keep the repository base only for built/previewed files.
   base: command === 'serve' && !isPreview ? '/' : '/Drishyam3D/',
   plugins: [react()],
+  worker: {
+    format: 'es'
+  },
   resolve: {
     alias: {
       '@engine': path.resolve(__dirname, '../scripts/engine'),
