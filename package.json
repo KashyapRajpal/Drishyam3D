@@ -9,7 +9,8 @@
     "visual:update": "node visual/run-visual.mjs --update",
     "visual:splat": "node visual/run-visual.mjs",
     "visual:ray": "node visual/run-ray-visual.mjs",
-    "visual:ray:update": "node visual/run-ray-visual.mjs --update"
+    "visual:ray:update": "node visual/run-ray-visual.mjs --update",
+    "docs:screenshots": "node visual/capture-readme-screenshots.mjs"
   },
   "repository": {
     "type": "git",
@@ -18,7 +19,6 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "bugs": {
     "url": "https://github.com/KashyapRajpal/Drishyam3D/issues"
   },

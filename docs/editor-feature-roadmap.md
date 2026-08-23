@@ -1,246 +1,67 @@
-# Editor Feature Roadmap
+# Drishyam3D Feature Roadmap
 
-Plan for the next round of **editor** (not renderer) capabilities in Drishyam3D. Parked while
-Phase 3b/3c renderer work proceeds — see [gaussian-splatting-plan.md](./gaussian-splatting-plan.md).
-
-## Context
-
-The editor today can edit the single default shader (WGSL / vert+frag) and the scene script,
-apply them live, and load meshes/splats. We want six new capabilities: **save/load real files, a
-render-mode compare slider, a debug/stats overlay, texture upload, multi-texture materials, and an
-authorable post-processing effects framework**.
-
-### Scope decisions
-
-- **Compare slider** = *render-mode* compare (textured vs untextured, lit vs points, effect on vs
-  off) — a wipe divider on the viewport, same GPU context on both sides.
-- **Effects** = a small **SDK-style framework** (authors add their own shader-pass files), shipped
-  with example effects (blur + depth-of-field).
-- **Save/load** = **real files on disk** via the File System Access API (download fallback).
-- **Effects + multi-texture must work on BOTH backends** (WebGL 1.0 and WebGPU).
-
-Work is phased so each phase is independently shippable. Early phases build plumbing later ones
-reuse (engine→UI stats channel, generalized editable-file model, offscreen-render refactor).
-
-### Architecture facts this plan relies on
-
-- WebGPU: [webgpu-scene.js](../scripts/engine/webgpu-scene.js) owns the RAF loop + per-frame `frame`
-  object and dispatches to a `Renderer` registry ([mesh-renderer.js](../scripts/engine/renderers/mesh-renderer.js),
-  [splat-renderer.js](../scripts/engine/renderers/splat-renderer.js)). Renderers `beginRenderPass`
-  straight onto the swapchain view.
-- WebGL: [scene.js](../scripts/engine/scene.js) is a monolithic `render()` writing to the default
-  framebuffer. It carries legacy `console.log`/`console.trace` noise worth removing while here.
-- Facades ([webgpu-facade.js](../scripts/engine/webgpu-facade.js),
-  [webgl-facade.js](../scripts/engine/webgl-facade.js)) expose the public engine object consumed by
-  [App.jsx](../ui/src/App.jsx). New engine capabilities are added as methods there.
-- `App.jsx` holds editable content in React state seeded from Vite `?raw` glob imports; the editable
-  set + apply routing are **hardcoded** to the 4 default files and must be generalized.
-- Texture helpers exist: `createTextureFromImageBitmap` / `createTextureFromUrl` in
-  [webgpu-helpers.js](../scripts/engine/webgpu-helpers.js).
-- User-script trust boundary is [script-runtime.js](../scripts/engine/script-runtime.js)
-  (`compileUserScript` via `new Function`); keep code execution confined there — loaded external
-  engine `.js` files stay view/edit-only, never executed.
+Comprehensive architecture and delivery roadmap for **Drishyam3D** — tracking completed milestones, active work, and forward-looking capabilities across engine rendering, UI workspaces, and developer tooling.
 
 ---
 
-## Phase 0 — Debug/stats overlay + engine→UI stats channel
+## Milestone Status Overview
 
-*Small. Establishes the stats channel reused by Compare and Effects.*
-
-- **Engine:** in both scene cores, maintain a rolling FPS (EMA over `deltaTime`) and expose
-  `engine.getStats()` → `{ backend, fps, frameMs, drawableKind, triangleCount, vertexCount, splatCount }`.
-  `triangleCount = drawable.vertexCount/3` for meshes; `splatCount = drawable.count` for splats.
-  Add `getStats` to the object returned by both facades.
-- **UI:** a `StatsOverlay` component absolutely positioned over the viewport, polling
-  `engine.getStats()` on a ~4 Hz interval (NOT per-frame, to avoid React churn). Toggle via a
-  Settings menu item "Show Stats".
-- **Files:** `webgpu-scene.js`, `scene.js`, both facades, `App.jsx`, `styles.css`.
-
-## Phase 1 — Save/Load real files + generalized editable-file model
-
-*Unlocks authoring shaders/effects as real files and re-opening them.*
-
-- **New helper** `ui/src/lib/fileAccess.js`: `openTextFile()` (`showOpenFilePicker`, fallback
-  `<input type=file>`), `saveTextFile(handle, text)`, `saveTextFileAs(text, suggestedName)`
-  (`showSaveFilePicker`, fallback Blob download). Keep the `FileSystemFileHandle` for silent re-save.
-- **Generalize App.jsx editable model:** replace hardcoded `isEditable` / `editableDefaults` / apply
-  routing with a per-tab descriptor `{ path, role, handle? }` where
-  `role ∈ {script, wgsl, vert, frag, effect, readonly}`. `handleApply` dispatches by `role` rather
-  than comparing against 4 fixed paths. Opened external files become editable tabs with a role
-  inferred from extension.
-- **Editor footer:** **Save** (Cmd/Ctrl+S → write back to stored handle), **Save As…**, and
-  **File ▸ Open File…** to load an external shader/script/effect into a new tab.
-- **Files:** `App.jsx` (largest change), new `ui/src/lib/fileAccess.js`, `styles.css`.
-
-## Phase 2 — Texture upload for the current object (single texture)
-
-- **Engine:** add `engine.setObjectTexture(imageBitmap)` to both facades. WebGPU builds a texture via
-  `createTextureFromImageBitmap`, assigns to `drawable.texture`, calls the mesh renderer's `prepare()`
-  (forces bind-group rebuild) + `forceUpdate`. WebGL uploads the bitmap to a GL texture and sets
-  `drawable.texture` (the render loop already honors `drawable.texture` + `uHasTexture`).
-- **UI:** Shapes (or a new **Texture**) menu → "Load Texture…" → image picker → `createImageBitmap`
-  → `engine.setObjectTexture`.
-- **Files:** both facades, `webgpu-helpers.js` / `geometry.js`, `App.jsx`.
-
-## Phase 3 — Split-screen render-mode compare (wipe slider)
-
-*Same context both sides; scissor-based. Mesh path first (splat compare deferred).*
-
-- **Engine:** add a compare controller to both scene cores:
-  `engine.setCompareMode({ enabled, split, left, right })` where `left`/`right` are render-mode ids
-  (`textured`, `untextured`, `lit`, `points`, later `effect-on`/`effect-off`). Each frame, draw the
-  scene twice with a scissor rect: left `[0..split·w]` mode A, right `[split·w..w]` mode B.
-  - WebGPU: two `beginRenderPass`es (pass 2 `loadOp:'load'`), each with `pass.setScissorRect(...)`.
-  - WebGL: `gl.enable(SCISSOR_TEST)` + `gl.scissor(...)`, draw twice with per-side uniforms.
-- **UI:** a draggable vertical divider overlaid on the viewport (ICAT-style) updating `split` (0..1);
-  a menu to enable compare and pick left/right modes.
-- **Out of scope:** WebGL-vs-WebGPU compare (one canvas = one context) — would need dual canvases.
-  `effect-on/off` modes land after Phase 4.
-- **Files:** `webgpu-scene.js` + `mesh-renderer.js`, `scene.js`, both facades, `App.jsx`, `styles.css`.
-
-## Phase 4 — Post-processing effects SDK + example effects (blur, DoF)
-
-*Largest phase. Refactors both scene cores to render offscreen, then run an effect chain.*
-
-- **Offscreen refactor:**
-  - WebGPU: scene renders the mesh/splat pass into an offscreen color target (+ depth for DoF)
-    instead of the swapchain; a `PostProcessStack` composites through the chain to the swapchain.
-  - WebGL: FBO ping-pong (two framebuffers+textures) + a shared full-screen-quad vertex shader.
-- **Author SDK contract:** an effect = one shader-pass file per backend under `assets/effects/`
-  (`*.effect.wgsl` and `*.effect.glsl`). Params are declared in a parsed header pragma, e.g.
-  `//! param intensity float 1.0 0.0 2.0`, so authors add an effect purely by writing a shader file —
-  no separate JS registration. The framework parses the header, builds the uniform buffer, and
-  exposes sliders. Inputs available to a pass: previous color texture, original depth, resolution,
-  time, params. Ship examples: `identity` (template), `blur` (separable Gaussian), `dof`.
-- **UI:** an **Effects** panel — enable/disable the stack, list/reorder active effects, per-param
-  sliders (from the parsed header). Effect files appear in Explorer under an **Effects** group,
-  editable + applyable like shaders (reuses Phase 1's `effect` role).
-- **Files:** `webgpu-scene.js` + new `renderers/post-process.js`, `scene.js` (FBO path), new
-  `assets/effects/*`, new `scripts/engine/effect-parser.js`, both facades, `App.jsx`, `styles.css`.
-  Add a Vite glob for `assets/effects/`.
-
-## Phase 5 — Multi-texture materials for complex shaders
-
-*Builds on Phase 2 upload + Phase 4 texture-binding conventions.*
-
-- **Engine:** expand the mesh material to N named texture slots (albedo, normal, roughness, extra —
-  4 slots). WebGPU: grow the `MeshRenderer` bind group + WGSL default shader bindings, add per-slot
-  `hasTexture` flags to the material uniform. WebGL: add `uSampler0..N` + per-unit `activeTexture`
-  binds and extend `buildProgramInfo`.
-- **UI:** a **Material** panel to assign an uploaded image to each named slot.
-- **Files:** `mesh-renderer.js` + `assets/shaders/default.wgsl`, `webgl-helpers.js` /
-  `webgl-facade.js` + `assets/shaders/default.frag`, both facades
-  (`setObjectTexture(slot, bitmap)`), `App.jsx`.
-
-## Phase 6 — Multi-format asset loading (mesh + splat)
-
-*Turns the two hardcoded entry points (`parsePly` for 3DGS, `parseGltf` for glTF) into a
-format-dispatch layer so new formats are additive, and adds the formats users actually have.*
-
-### Motivation
-
-A `.ply` extension says nothing about the payload — the same container holds Gaussian splats,
-textured triangle meshes (vertex xyz + faces + `multi_texture_vertex` UVs + an external image), and
-vertex-coloured meshes (per-vertex `red/green/blue`). Dispatch must inspect the header, not the
-extension, and the loader set must cover meshes as well as splats.
-
-### Architecture
-
-- **Loader registry** `scripts/engine/loaders/registry.js`: `pickLoader(filename, bytes)` inspects
-  extension + magic/header and returns `{ kind: 'mesh' | 'splat', parse(buffer) }`. Each parser stays
-  **pure** (typed arrays out, no GPU); the facade owns upload — same split as `ply-loader.js` today.
-- **Single UI entry point:** facades expose `engine.loadModel(files)`; `App.jsx`'s Load actions all
-  funnel through it. Multi-file assets (a PLY + its external texture) come in via a multi-select
-  picker (`showOpenFilePicker({ multiple: true })`, fallback `<input type=file multiple>`) or a
-  directory picker; the registry pairs them by basename.
-
-### Mesh formats
-
-- **PLY meshes (Artec / generic)** — *implemented first, see Phase 6a below.* vertex `x/y/z`
-  (+ optional `red/green/blue`, `nx/ny/nz`), `face` polygons (triangulated), `multi_texture_vertex`
-  `u/v` + `multi_texture_face` indirect UV indices, external image texture. New
-  `scripts/engine/mesh-ply-loader.js`.
-- **GLB (binary glTF)** — extend `gltf-parser.js` to accept the 12-byte GLB header + JSON/BIN chunks
-  and embedded images, so one code path serves `.gltf` and `.glb`. (Today the parser `JSON.parse`s
-  the whole file, so it only handles text `.gltf`; `.glb` needs the chunk reader.)
-- **Deferred:** Draco / meshopt compression, OBJ.
-
-> **Note — glTF is becoming a splat container too.** glTF now carries 3D Gaussian splats via Khronos
-> extensions (`KHR_gaussian_splatting`, with `KHR_spz_gaussian_splats_compression` for the SPZ
-> payload). This **collapses the mesh/splat dispatch boundary**: a single `.gltf`/`.glb` can yield a
-> *splat cloud* rather than a triangle mesh, decided by the presence of the extension, not the file
-> type. So the GLB reader must branch on `extensionsUsed` and feed the splat pipeline
-> (`packSplats` + splat renderers) when the extension is present — the same normalization target the
-> other splat formats use. Worth building the GLB reader with this in mind rather than as mesh-only.
-
-### Splat formats
-
-All normalize to the existing parsed arrays
-(`{ positions, colors, opacities, scales, rotations, shCoeffs, ... }`) so `packSplats` + the splat
-renderers are untouched.
-
-- **INRIA binary PLY** — current `ply-loader.js`.
-- **`.splat`** (antimatter15) — 32 B/splat: position f32×3, scale f32×3, rgba u8×4, rot u8×4. Trivial,
-  widely shared.
-- **`.spz`** (Niantic) — gzip-compressed, quantized positions/SH. Inflate via the built-in
-  `DecompressionStream('gzip')` (no dependency), then dequantize. *(Likely the "snz" format asked
-  about.)*
-- **Deferred:** `.ksplat`, SOG/`.sog`.
-
-### Phase 6a — Textured/colored PLY mesh (the immediate slice)
-
-The first, independently shippable cut (WebGPU): render textured and vertex-coloured PLY meshes.
-
-- **Parser** `mesh-ply-loader.js` (pure): produce `{ positions, normals, texCoords, colors?, indices
-  (Uint32), vertexCount, bounds }`. Expand per-face corners to resolve the Artec indirect UV
-  indexing; compute normals when absent; triangulate n-gon faces by fan.
-- **uint32 indices:** `MeshRenderer.record` currently hardcodes `setIndexBuffer(..., 'uint16')`;
-  read `drawable.indexFormat ?? 'uint16'` and let `createIndexBuffer` accept `Uint32Array`
-  (400k verts ≫ 65 535).
-- **Vertex color (Vase):** add an optional `@location(3)` color attribute to `default.wgsl` + the mesh
-  pipeline; cube/sphere/bear supply a white default so the shared layout is uniform. Fragment
-  multiplies it in alongside `baseColor`/`texColor`.
-- **Texture (Bear):** the companion JPEG loads via the multi-select picker → `createImageBitmap` →
-  `createTextureFromImageBitmap` (helper already exists), assigned to `drawable.texture`.
-- **Facade + UI:** `engine.loadMesh({ mesh, textureBitmap })`, a `loadMeshFile` in `scene-ops.js`, and
-  a **Load Mesh…** action. Reuse the existing `frameCamera` + the (now working) triangle-count stats.
-- **Files:** new `scripts/engine/mesh-ply-loader.js`, `mesh-renderer.js`, `webgpu-helpers.js`,
-  `assets/shaders/default.wgsl`, `webgpu-facade.js`, `scene-ops.js`, `App.jsx`, `__tests__/`.
-
-### Risks
-
-- Large meshes on **WebGL 1.0** need `OES_element_index_uint` for uint32 indices (or 16-bit
-  sub-batching); Phase 6a is **WebGPU-first**, WebGL mesh parity tracked separately.
-- Adding a vertex-color attribute changes the shared mesh vertex layout — every mesh drawable
-  (cube/sphere/glTF) must supply the buffer (default white) to keep one pipeline.
-- Multi-file assets depend on File System Access multi-select; the `<input>` fallback must accept
-  `.ply` + image together.
+| Phase | Milestone / Capability | Status | Highlights |
+| :--- | :--- | :---: | :--- |
+| **Phase 0** | **Stats & Diagnostics Overlay** | ✅ Completed | Real-time EMA FPS, frame times, triangle/splat counts, backend indicators. |
+| **Phase 1** | **Local File System Access API** | ✅ Completed | Native `Cmd+O` / `Cmd+S` disk save/load for WGSL/GLSL shaders and JS scene scripts. |
+| **Phase 2** | **Texture & Logo Mapping** | ✅ Completed | Drishyam3D logo mapping across 3D primitives; single-texture upload support. |
+| **Phase 3** | **Ray Tracing & Hybrid Shadows** | ✅ Completed | CPU/GPU Progressive Path Tracing (Cornell Box) + Real-time Hybrid Ray-Traced Shadows. |
+| **Phase 3a**| **3D Gaussian Splatting (3DGS)** | ✅ Completed | Neural `.ply` ingestion, WebGPU on-GPU bitonic depth sorting, alpha blending. |
+| **Phase 3b**| **Split-Screen Compare Slider** | ✅ Completed | Interactive wipe divider overlay (`CompareSlider.jsx`) for before/after comparison. |
+| **Phase 3c**| **UI Modernization & Dual Modes** | ✅ Completed | Minimal View Mode (floating glass HUD) + Studio Edit Mode (tabbed CodeMirror IDE). |
+| **Phase 3d**| **Automated Doc & Screenshot System**| ✅ Completed | Headless WebGPU Playwright screenshot runner & automated README sync (`npm run docs:screenshots`). |
+| **Phase 6a**| **Textured & Colored PLY Mesh Loader**| ✅ Completed | Header inspection for 3DGS vs mesh, Artec UV indexing, uint32 index buffer support. |
+| **Phase 4** | **Post-Processing Effects SDK** | ⏳ Next Up | Offscreen FBO pipeline, shader-pass authoring, Gaussian Blur & Depth of Field (DoF). |
+| **Phase 5** | **Multi-Texture PBR Materials** | 📅 Planned | Albedo, Normal, Roughness, Metallic texture slots with PBR WGSL/GLSL shaders. |
+| **Phase 6b**| **Binary glTF (.glb) & Niantic .spz** | 📅 Planned | In-memory 12-byte chunk reader for `.glb` and gzip decompression for `.spz` neural splats. |
+| **Phase 7** | **Camera Orbit Animation & 4K Recording**| 📅 Planned | Spline-based camera paths and high-res WebM canvas export. |
 
 ---
 
-## Verification (per phase)
+## Completed Highlights
 
-Run `cd ui && npm run dev` and exercise each phase in the browser on **both** backends
-(Settings ▸ Renderer):
+### 1. Dual Workspace Architecture (Minimal View + Studio Edit)
+- **Minimal View Mode**: Uncluttered full-viewport viewing with floating dark-glass control bar, backend selector, render mode pill, and collapsible Quick Guide HUD.
+- **Studio Edit Mode**: Full 3-panel IDE with categorized top menu (**File**, **Examples**, **Shapes**, **Render Engine**, **View**, **Help**), file explorer, and tabbed CodeMirror editor.
+- **Persistent Viewport**: Canvas is never destroyed when switching modes, preserving WebGPU contexts and animation loops.
 
-- **P0:** overlay shows plausible FPS + correct triangle/splat counts; no per-frame React re-render.
-- **P1:** edit default.wgsl, Save As to disk, reload, Open File it back, Apply → change renders.
-  Cmd+S writes back to the same file silently.
-- **P2:** Load Texture on a cube/sphere → image appears, both backends.
-- **P3:** enable compare, drag the divider → left/right show the selected modes.
-- **P4:** enable blur then DoF; edit `blur.effect.*`, Apply → live recompile; sliders work; both backends.
-- **P5:** assign different images to albedo/normal slots → a custom shader samples both.
-- **P6a:** Load Mesh… a textured PLY (`.ply` + image) → a solid textured surface; a vertex-coloured
-  PLY → correct per-vertex colors; triangle count shows in the stats overlay.
+### 2. Hardware Ray Tracing & Progressive Path Tracing
+- **Progressive Global Illumination**: Multi-bounce diffuse path tracing with real-time SPP accumulation and live pause/resume controls.
+- **Hybrid Real-Time Shadows**: WebGPU G-buffer rasterization coupled with compute-traced hard shadow rays for retained glTF models.
+- **Acceleration Structures**: Built-in BLAS and TLAS builders with SAH/BVH acceleration.
 
-Add Jest tests for pure logic introduced (effect-header parser, stats math, compare-split math)
-alongside the existing `__tests__/` suites; run `npm test` from the repo root.
+### 3. Neural 3D Gaussian Splatting
+- **GPU Compute Bitonic Sort**: Parallel per-frame depth sorting on WebGPU compute shaders.
+- **Spherical Harmonics**: View-dependent color representation (degrees 0–3) with premultiplied alpha blending.
 
-## Notes / risks
+### 4. Automated Screenshot & Docs Synchronizer
+- **Declarative Scenarios**: `visual/readme-scenarios.mjs` defines test recipes across all features.
+- **Automated Capture**: `npm run docs:screenshots` drives Chrome with WebGPU flags to generate 2x retina images and sync `README.md`.
 
-- **WebGL post-processing (Phase 4) is the highest-risk item:** WebGL 1.0 FBO + float-depth
-  limitations mean DoF may need a packed-depth workaround; scope DoF quality accordingly there.
-- `scene.js` (WebGL) should be de-noised of legacy `console.log`/`console.trace` calls as it is
-  refactored across P0/P3/P4.
-- Keep all executed user code flowing through `compileUserScript`; loaded external engine `.js`
-  stays view/edit-only.
+---
+
+## Upcoming Phases
+
+### Phase 4 — Post-Processing Effects SDK (Next Up)
+- **Offscreen Target Pipeline**: Render scene to offscreen color and depth textures.
+- **Authorable Shader Passes**: Author new effect passes with auto-parsed parameter pragmas (e.g. `//! param intensity float 1.0 0.0 2.0`).
+- **Initial Effects**: Separable Gaussian Blur and Depth of Field (DoF).
+- **Effects Control Panel**: Reorderable stack with real-time uniform sliders.
+
+### Phase 5 — Multi-Texture PBR Materials
+- **Expanded Texture Slots**: 4 distinct material channels (Albedo, Normal, Roughness, ORM).
+- **PBR Pipeline**: Physically-based rendering in WGSL and GLSL with environment map support.
+
+### Phase 6b — Expanded Neural & Mesh Containers
+- **Binary glTF (`.glb`)**: Chunk parser for single-file models with embedded textures.
+- **Niantic `.spz`**: Compressed Gaussian splat decompression via `DecompressionStream('gzip')`.
+
+### Phase 7 — Cinematic Camera & Recording
+- **Keyframe Orbit Paths**: Smooth Bézier/spline camera fly-through sequences.
+- **Direct Canvas Video Export**: Real-time 60fps / 4K WebM recording via `MediaRecorder` API.

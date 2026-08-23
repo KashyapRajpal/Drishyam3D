@@ -25,35 +25,38 @@ Drishyam3D is a lightweight, browser-based 3D scene editor built with **WebGPU**
 
 ## Screenshots & Demo
 
-### Editor Interface
-The Drishyam3D editor provides a professional three-panel layout for interactive 3D development:
+<!-- AUTO_SCREENSHOT_GALLERY:START -->
+### Minimal View Mode
+> **`UI & Workspace`** — Clean, distraction-free 3D viewport featuring the Drishyam3D logo-textured cube, floating glass control bar, and interactive Quick Guide & Legend HUD.
 
-![Drishyam3D Editor with glTF Model](drishyam-editor-clean.png)
+![Minimal View Mode](assets/screenshots/minimal-view-mode.png)
 
-**Key Features Visible:**
-- **Left Panel**: Explorer showing project files, shaders (WGSL for WebGPU), and engine modules
-- **Center Panel**: Real-time 3D viewport with WebGPU rendering showing a textured glTF model
-- **Right Panel**: Code editor with syntax highlighting for scene scripts and shaders
-- **Auto-reload**: Real-time updates as you edit code
+### Studio Edit Mode
+> **`Code Editor & IDE`** — Full-featured 3D IDE workspace with a categorised top menu bar, live file tree explorer, real-time 3D WebGPU canvas, and multi-tab WGSL/GLSL CodeMirror editor.
+
+![Studio Edit Mode](assets/screenshots/studio-edit-mode.png)
+
+### GPU Path Tracing (Cornell Box)
+> **`Ray Tracing`** — Real-time progressive path tracing with multi-bounce diffuse global illumination, soft color bleeding, and live SPP accumulation HUD.
+
+![GPU Path Tracing (Cornell Box)](assets/screenshots/cornell-box-raytrace.png)
+
+### Hybrid Ray-Traced Shadows (glTF)
+> **`Hybrid Rendering`** — Combines high-performance rasterized G-buffer primary visibility with real-time hardware ray-traced hard shadows on complex glTF geometry.
+
+![Hybrid Ray-Traced Shadows (glTF)](assets/screenshots/hybrid-shadows-gltf.png)
 
 ### 3D Gaussian Splatting Rendering
-Drishyam3D supports modern neural rendering techniques. Load and render 3D Gaussian Splat scenes (.ply format) with GPU-accelerated depth sorting:
+> **`Neural Rendering`** — Neural 3D Gaussian Splat scenes (.ply format) rendered with per-frame WebGPU compute-shader bitonic depth sorting, premultiplied alpha blending, and 360° orbital camera control.
 
-![Drishyam3D Gaussian Splat Rendering](drishyam-splat-render.png)
+![3D Gaussian Splatting Rendering](assets/screenshots/drishyam-splat-render.png)
 
-The tree above was captured using 3D Gaussian Splatting and is rendered in real-time with:
-- **Per-frame depth sorting** via WebGPU compute shaders
-- **Premultiplied alpha blending** for correct transparency
-- **Interactive camera control** for 360° viewing
-- **Debug visualization modes** (Points, Points-Sorted) for validation
+### Command Palette (Cmd+K)
+> **`Productivity`** — Fast keyboard-first command palette over a frosted glass backdrop for instant switching between shaders, scenes, render engines, and settings.
 
-### Capabilities
-- **Dual Rendering**: Switch between WebGL (legacy) and WebGPU (modern) backends in Settings
-- **Model Import**: Load glTF models, 3D Gaussian Splats (.ply), and procedural shapes
-- **Shader Editing**: Write custom WGSL (WebGPU) or GLSL (WebGL) shaders with real-time feedback
-- **Scene Scripting**: Control objects, animations, and interactions with JavaScript
-- **Neural Rendering**: Render 3D Gaussian Splatting scenes with GPU-accelerated depth sorting
-- **Seamless Integration**: Mix traditional geometry and splats in the same scene
+![Command Palette (Cmd+K)](assets/screenshots/command-palette.png)
+
+<!-- AUTO_SCREENSHOT_GALLERY:END -->
 
 For a live demo, visit: [**https://kashyaprajpal.github.io/Drishyam3D/**](https://kashyaprajpal.github.io/Drishyam3D/)
 
@@ -115,157 +118,58 @@ The editor is divided into three main panels and a top menu bar.
 
 ### Menu Bar
 
-*   **File Menu**:
-    *   `Load Chronograph Watch (CC BY 4.0)`: Loads the
-        [Khronos Chronograph Watch](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/ChronographWatch)
-        external-file glTF for a realistic multi-mesh sample and ray-traced-shadow stress case.
-        The app switches to WebGPU automatically because the legacy WebGL path renders only one
-        glTF primitive, while this asset contains 19.
-        The model and textures are by Eric Chadwick / Darmstadt Graphics Group GmbH and are
-        used under [CC BY 4.0 and the accompanying logo terms](https://github.com/KhronosGroup/glTF-Sample-Assets/blob/main/Models/ChronographWatch/LICENSE.md).
-        Geometry, base-color textures, and hybrid shadows load today; transmission, material
-        variants, texture transforms, glTF animation, and full normal/ORM PBR shading are not
-        yet represented faithfully.
-    *   `Load Asset…`: Opens a **folder picker** and loads the model inside it (see
-        [Asset folder convention](#asset-folder-convention)). The format is detected automatically:
-        a `.gltf` (with its `.bin`/textures) on either backend, or a `.ply` on **WebGPU** — which is
-        further inferred as a Gaussian **splat** or a triangle **mesh** from its header.
-    *   `Reset Scene`: Resets the viewport to the default cube and reloads the original scene script.
+## Workspace & Workflows
 
-#### Asset folder convention
+### 1. Minimal View Mode
+- **Navigation & Inspection**: Orbit, pan, and zoom across 3D scenes without UI distraction.
+- **Floating HUD**: Quick toggle for render backends (WebGPU / WebGL), render mode selector (Raster, CPU Path Tracing, GPU Path Tracing, Hybrid Shadows), and performance stats.
+- **Interactive Legend**: Bottom-left badge with quick camera shortcuts and engine guides.
 
-`Load Asset…` selects a **directory**, not a single file — browsers can't read a picked file's
-sibling files, so a folder grant is what lets the companion assets (`.bin`, textures) load
-automatically. Therefore **each asset lives in its own folder**, containing exactly one primary
-model file (`.gltf`, `.glb`, or `.ply`) plus its dependencies (`.bin`, image textures).
+### 2. Studio Edit Mode
+- **Top Menu Bar**:
+  - **File**: `Open Local File…` (`⌘O`), `Save File` (`⌘S`), `Load Sample glTF`, `Load Asset Folder…`, `Reset Scene`.
+  - **Examples**: `🏛️ Cornell Box (CPU Path Tracing)`, `⚡ Cornell Box (GPU Path Tracing)`, `📦 Sample glTF (Ray-Traced Shadows)`.
+  - **Shapes**: `Cube`, `Sphere`, and `Textured` (with Drishyam3D logo).
+  - **Render Engine**: `⚡ WebGPU` and `🌐 WebGL`.
+  - **View**: Toggle File Explorer, Tabbed Code Editor, Real-time Stats Overlay, and Fullscreen.
+- **Tabbed CodeMirror Editor**:
+  - Live editing of WGSL and GLSL shaders (`default.wgsl`, `default.vert`, `default.frag`) and JavaScript scene scripts (`scene-script.js`).
+  - `⌘↵` / `Ctrl+↵` to instantly compile and apply changes live.
 
-Folder structure example:
-```
-my-model/
-  my-model.gltf              (or .glb)
-  my-model.bin
-  textures/
-    my-model_diffuse.jpg
-    my-model_normal.png
-```
+---
 
-Point `Load Asset…` at the folder and everything inside resolves automatically. The loader picks
-the first `.gltf`/`.glb`/`.ply` it finds, so keep one primary model per folder.
-*   **Shapes Menu**:
-    *   `Textured` (Checkbox): When checked, any shape loaded from this menu will use the default checkerboard texture. This setting updates the current shape in real-time.
-    *   `Cube` / `Sphere`: Loads a primitive cube or sphere into the scene.
-*   **Settings Menu**:
-    *   `Renderer`: Choose between **WebGL** or **WebGPU** backends.
-    *   `Splat Debug` (when splat loaded): Cycle through debug modes — **Off** (full rendering), **Points** (splat centers), **Points (sorted)** (colored by depth order).
+## Roadmap & Milestones
 
-### Basic Workflows
+See [**`docs/editor-feature-roadmap.md`**](docs/editor-feature-roadmap.md) for detailed technical specifications.
 
-#### Triangle-Based Rendering
+| Milestone | Capability | Status |
+| :--- | :--- | :---: |
+| **Phase 1** | **Modern UI Overhaul & Dual Modes** (Minimal View + Studio IDE) | ✅ Completed |
+| **Phase 2** | **Dual Engine Pipeline** (WebGPU Compute + WebGL Fallback) | ✅ Completed |
+| **Phase 3a** | **3D Gaussian Splatting** (GPU Bitonic Depth Sorting & Alpha Blending) | ✅ Completed |
+| **Phase 3b** | **Hardware Ray Tracing** (Progressive GPU/CPU Path Tracing + Hybrid Shadows) | ✅ Completed |
+| **Phase 3c** | **Command Palette & Native Disk Access** (`⌘K`, `⌘O`, `⌘S`) | ✅ Completed |
+| **Phase 3d** | **Automated High-DPI Screenshot & README Sync Engine** | ✅ Completed |
+| **Phase 4** | **Post-Processing Effects SDK** (Offscreen FBOs, Blur, Depth of Field) | ⏳ Next Up |
+| **Phase 5** | **Multi-Texture PBR Materials** (Albedo, Normal, Roughness, Metallic) | 📅 Planned |
+| **Phase 6** | **Expanded Neural Containers** (Niantic `.spz`, Binary glTF `.glb`) | 📅 Planned |
+| **Phase 7** | **Cinematic Camera Orbit & 4K WebM Canvas Recording** | 📅 Planned |
 
-1.  **Load a Model**: Use **File > Load Sample Model**, **File > Load Asset…** (pick a model folder), or **Shapes > Sphere** to get an object in the scene.
-2.  **Animate the Model**:
-    *   In the Explorer, double-click `scene-script.js`.
-    *   Modify the `update` function to change the model's rotation, position, or scale. For example, change `state.modelRotation += deltaTime * 0.5;` to `state.modelRotation += deltaTime * 2.0;` to make it spin faster.
-3.  **Change its Appearance**:
-    *   In the Explorer, double-click `default.vert` or `default.frag` (WebGL) / `default.wgsl` (WebGPU) under the "Shaders" folder.
-    *   Modify the shader code. For example, to make untextured objects red in GLSL, change the `else` block to `gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);`.
-4.  **See Your Changes**:
-    *   Click the **Apply** button in the editor footer.
-    *   Alternatively, check **Auto Refresh** and changes will apply automatically about 3 seconds after you stop typing.
-
-#### 3D Gaussian Splatting (WebGPU Only)
-
-1.  **Switch to WebGPU**: Open Settings → **Renderer** → **WebGPU** (requires Chrome/Edge 113+).
-2.  **Load a Splat Scene**: Use **File > Load Asset…** and pick a folder containing a 3DGS `.ply` capture (it's detected as a splat automatically).
-3.  **Inspect Geometry** (Optional):
-    *   Open Settings → **Splat Debug** and cycle through:
-        *   **Points**: See raw splat centers (validates loading & projection).
-        *   **Points (sorted)**: See centers colored by depth order (validates GPU sort).
-        *   **Off**: Full Gaussian splatting rendering.
-4.  **Orbit the Scene**: Use the mouse to rotate the camera and see the splats render from all angles with correct back-to-front blending.
-
-## Roadmap
-
-The goal of Drishyam3D is to evolve into a forward-looking platform for modern, high-performance web graphics. Development is organized into focused phases: a foundational UI/UX overhaul, migration of the rendering core to WebGPU, and the addition of advanced rendering capabilities such as neural rendering and hardware-accelerated ray tracing.
-
-### Phase 1: Foundational UI/UX Overhaul (Completed)
-
-The UI has been migrated from the original vanilla JavaScript front-end to a React-based app while keeping the overall layout and workflow the same.
-
-### Phase 2: Next-Generation Rendering Engine (Completed)
-
-The core rendering engine has been migrated from WebGL to **WebGPU** and now runs on both backends, selectable in Settings. This is a foundational step that unlocks significant performance improvements and modern GPU capabilities. Key achievements include:
-*   **Dual Backend Support**: WebGL 1.0 (legacy) and WebGPU (modern) backends coexist. The public engine API is backend-agnostic.
-*   **High-Performance Rendering**: Lower CPU overhead for complex scenes via WebGPU.
-*   **Compute Shader Support**: Native WebGPU compute shaders enable high-performance GPGPU workloads, parallel data processing, and advanced algorithms like the bitonic sort for splat depth ordering.
-*   **Backend-Agnostic Asset Loading**: glTF models load identically on both backends.
-
-### Phase 3a: Neural Rendering (Completed)
-
-**3D Gaussian Splatting** renderer is now live and production-ready:
-*   **Load 3DGS Scenes**: Import `.ply` files captured with standard 3D Gaussian Splatting methods.
-*   **GPU-Accelerated Depth Sort**: Bitonic sort implemented as a WebGPU compute pass, sorting splats back-to-front every frame without CPU bottleneck.
-*   **Premultiplied Alpha Blending**: Correct view-dependent transparency rendering for Gaussian splats.
-*   **Debug Visualization**: Optional debug modes (Points, Points-Sorted) for validating splat geometry and sort correctness.
-*   **Seamless Integration**: Splats render alongside traditional geometry in the same scene using a polymorphic Renderer hierarchy.
-
-### Phase 3b: Advanced Rendering (In Progress)
-
-Planned enhancements to the Gaussian Splatting pipeline:
-*   **Full Spherical Harmonics**: View-dependent color (degrees 1–3) for realistic relighting.
-*   **GPU Radix Sort**: Faster sorting for very large splat counts (>10M).
-*   **Compressed Formats**: `.splat` and other neural-rendering-native formats.
-
-### Phase 3c: Ray Tracing (Forward-Looking)
-
-Hardware-accelerated ray tracing for photorealistic lighting, shadows, and reflections — pending stable WebGPU ray-query support in browsers.
-
-
+---
 
 ## Contributing
 
-Contributions are welcome! Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before participating. If you have a feature request, bug report, or want to contribute code, please feel free to open an issue or submit a pull request.
+Contributions are welcome! Please feel free to open an issue or submit a pull request.
 
-### Contribution Workflow
-
-1.  Fork the Project
-2.  Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3.  Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4.  Push to the Branch (`git push origin feature/AmazingFeature`)
-5.  Open a Pull Request
-
-### For New Features: Include a Demo
-
-To help reviewers and future users understand your feature, **please include visual documentation** in your pull request:
-
-- **Screenshots**: Capture key states or results of your feature (use `npm run dev` to run the app and take screenshots)
-- **Short Video**: Record a 10-30 second video showing the feature in action. Tools:
-  - **macOS**: QuickTime Player (File → New Screen Recording) or ScreenFlow
-  - **Windows**: Windows 10/11 Game Bar (Win+G) or OBS Studio
-  - **Linux**: OBS Studio or SimpleScreenRecorder
-  
-  Export as **MP4** and add to your PR description or comments using GitHub's video upload.
-
-- **GIF for Quick Demos**: Use tools like [ffmpeg](https://ffmpeg.org/) or [gifshot](https://yahoo.github.io/gifshot/) to create animated GIFs (especially useful for small interactions)
-
-**Example PR Description:**
-```markdown
-## What's New
-Added real-time shader error highlighting in the editor.
-
-## Demo
-[Attach video or GIF showing the error highlighting in action]
-
-## Testing
-- Load a shader with syntax errors
-- Verify red underlines appear in the code
-- Fix the error and confirm highlighting clears
+### Adding Features & Visuals
+When implementing a new visual feature or shader pass, add a scenario recipe to `visual/readme-scenarios.mjs` and run:
+```bash
+npm run docs:screenshots
 ```
+This will automatically capture 2x retina screenshots and update the README gallery.
 
-This helps reviewers understand the context faster and makes it easier for new contributors to see what's possible with Drishyam3D!
+---
 
 ## License
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the [MIT License](LICENSE).
