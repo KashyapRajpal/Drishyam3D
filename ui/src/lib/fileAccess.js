@@ -32,8 +32,22 @@ export async function openTextFile() {
   return new Promise((resolve, reject) => {
     const input = document.createElement('input')
     input.type = 'file'
-    input.accept = '.js,.mjs,.wgsl,.glsl,.vert,.frag,.effect,.txt,text/javascript,text/plain'
+    input.accept = '.wgsl,.glsl,.vert,.frag,.effect,.txt,.js,.mjs,text/javascript,text/plain'
+    let resolved = false
+
+    const handleFocus = () => {
+      setTimeout(() => {
+        if (!resolved) {
+          resolved = true
+          window.removeEventListener('focus', handleFocus)
+          resolve(null)
+        }
+      }, 500)
+    }
+
     input.onchange = async () => {
+      resolved = true
+      window.removeEventListener('focus', handleFocus)
       if (!input.files || input.files.length === 0) {
         resolve(null)
         return
@@ -46,6 +60,8 @@ export async function openTextFile() {
         reject(e)
       }
     }
+
+    window.addEventListener('focus', handleFocus, { once: true })
     input.click()
   })
 }
