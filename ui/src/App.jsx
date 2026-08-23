@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
-import { initThreadedEngine } from '@engine/worker-facade.js'
+import { initEngine } from '@engine/app-facade.js'
 import { initCpuRayEngine } from '@engine/cpu-ray-facade.js'
 import { createCpuRayWorker } from '@engine/raytracing/cpu/cpu-ray-worker-client.js'
 import { createRayTracingCoordinator } from '@engine/raytracing-coordinator.js'
@@ -242,12 +242,11 @@ export default function App() {
           }
         : { vertex: fileContents[defaultVertPath] ?? defaultVert, fragment: fileContents[defaultFragPath] ?? defaultFrag }
 
-      const engine = await initThreadedEngine({
+      const engine = await initEngine({
         canvas,
         backend,
         shaderSources,
         scriptSource: fileContents[sceneScriptPath] ?? defaultScript,
-        useWorker: false,
         onError: (err) => {
           if (!cancelled) setError(err?.message || String(err))
         },
@@ -652,9 +651,13 @@ export default function App() {
       if (!ok && e.setShaders) setError('Shader compilation failed')
       else setError(null)
     } else if (activeTabPath.endsWith('.js')) {
-      const ok = e.updateScript ? e.updateScript(fileContents[activeTabPath]) : e.setScriptSource?.(fileContents[activeTabPath])
-      if (!ok && e.setScriptSource) setError('Script error')
-      else setError(null)
+      if (activeTabPath === sceneScriptPath) {
+        const ok = e.setScriptSource?.(fileContents[activeTabPath])
+        if (!ok && e.setScriptSource) setError('Script compilation failed')
+        else setError(null)
+      } else {
+        setError('External JavaScript files are view/edit-only and not executed for security.')
+      }
     }
   }
 
