@@ -129,7 +129,7 @@ export default function App() {
   const rayCoordinatorRef = useRef(null)
   const geometryFactoryRef = useRef(null)
   const pickerActiveRef = useRef(false)
-  const pendingSampleLoadRef = useRef(false)
+  const pendingActionRef = useRef(null)
 
   const [openFiles, setOpenFiles] = useState(() => [
     { path: sceneScriptPath, name: 'scene-script.js', role: 'script', isDirty: false, handle: null },
@@ -291,7 +291,7 @@ export default function App() {
 
   useEffect(() => {
     setHasModelLoaded(false)
-    setCurrentShape(pendingSampleLoadRef.current ? null : 'cube')
+    setCurrentShape(pendingActionRef.current ? null : 'cube')
     setTextured(false)
     setSplatLoaded(false)
     setSplatDebug('off')
@@ -304,6 +304,21 @@ export default function App() {
     setHasHybridScene(false)
     setRayPaused(false)
   }, [backend])
+
+  useEffect(() => {
+    if (!engineReady || !engineRef.current) return
+    const pendingAction = pendingActionRef.current
+    if (!pendingAction) return
+    pendingActionRef.current = null
+
+    if (pendingAction === 'sample') {
+      loadBuiltInSample()
+    } else if (pendingAction === 'hybrid-shadows') {
+      handleLoadSampleWithHybridShadows()
+    } else if (pendingAction === 'gpu-cornell') {
+      handleLoadGpuCornellBox()
+    }
+  }, [engineReady])
 
   useEffect(() => {
     if (!engineReady || !engineRef.current) return
@@ -372,19 +387,20 @@ export default function App() {
 
   async function handleLoadSample() {
     if (backend !== 'webgpu') {
-      pendingSampleLoadRef.current = true
+      pendingActionRef.current = 'sample'
       setError(null)
       setBackend('webgpu')
       return
     }
-    await loadBuiltInSample()
+    return await loadBuiltInSample()
   }
 
   async function handleLoadSampleWithHybridShadows() {
     try {
       if (backend !== 'webgpu') {
-        pendingSampleLoadRef.current = true
+        pendingActionRef.current = 'hybrid-shadows'
         setBackend('webgpu')
+        return
       }
       const drawable = await loadBuiltInSample()
       if (drawable && rayCoordinatorRef.current) {
@@ -419,13 +435,14 @@ export default function App() {
   }
 
   async function handleLoadGpuCornellBox() {
+    if (backend !== 'webgpu') {
+      pendingActionRef.current = 'gpu-cornell'
+      setBackend('webgpu')
+      return
+    }
     const coordinator = rayCoordinatorRef.current
     if (!coordinator) return
     try {
-      if (backend !== 'webgpu') {
-        pendingSampleLoadRef.current = true
-        setBackend('webgpu')
-      }
       await coordinator.loadCornellBox('raytrace-gpu')
       await coordinator.setRenderMode('raytrace-gpu')
       coordinator.setRayTracingSettings(raySettings)
@@ -534,7 +551,9 @@ export default function App() {
         }
       } else if (nextMode === 'raytrace-gpu') {
         if (backend !== 'webgpu') {
+          pendingActionRef.current = 'gpu-cornell'
           setBackend('webgpu')
+          return
         }
         if (!hasRayScene) {
           await handleLoadGpuCornellBox()
@@ -544,12 +563,12 @@ export default function App() {
         }
       } else if (nextMode === 'hybrid-shadows') {
         if (backend !== 'webgpu') {
+          pendingActionRef.current = 'hybrid-shadows'
           setBackend('webgpu')
+          return
         }
         if (!hasHybridScene) {
-          await handleLoadSample()
-          await coordinator.setRenderMode('hybrid-shadows')
-          coordinator.setLight(hybridLight)
+          await handleLoadSampleWithHybridShadows()
         } else {
           await coordinator.setRenderMode('hybrid-shadows')
           coordinator.setLight(hybridLight)
@@ -664,8 +683,8 @@ export default function App() {
       if (!ok && e.setShaders) setError('Shader compilation failed')
       else setError(null)
     } else if (targetPath.endsWith('.vert') || targetPath.endsWith('.frag')) {
-      const vertCode = getContent(defaultVertPath)
-      const fragCode = getContent(defaultFragPath)
+      const vertCode = targetPath.endsWith('.vert') ? getContent(targetPath) : getContent(defaultVertPath)
+      const fragCode = targetPath.endsWith('.frag') ? getContent(targetPath) : getContent(defaultFragPath)
       const ok = e.setShaders?.(vertCode, fragCode)
       if (!ok && e.setShaders) setError('Shader compilation failed')
       else setError(null)
@@ -700,13 +719,19 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [activeTabPath, openFiles, fileContents])
 
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement)
+    }
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  }, [])
+
   function toggleFullscreen() {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(() => {})
-      setIsFullscreen(true)
     } else {
       document.exitFullscreen().catch(() => {})
-      setIsFullscreen(false)
     }
   }
 
