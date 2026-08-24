@@ -14,8 +14,9 @@ Drishyam3D uses an automated Playwright workflow to capture 2x retina documentat
    cd ui && npm run dev
    ```
 
-2. Capture all documentation screenshots and update the README gallery:
+2. Capture all documentation screenshots and update the README gallery (run from the repository root in a separate terminal):
    ```bash
+   # From the repository root:
    npm run docs:screenshots
    ```
 
@@ -31,10 +32,10 @@ Drishyam3D uses an automated Playwright workflow to capture 2x retina documentat
      description: 'Concise explanation of the capability shown.',
      viewport: { width: 1280, height: 800 },
      async run(page) {
-       await page.waitForFunction(() => !!window.__DRISHYAM_ENGINE);
+       await page.waitForFunction(() => !!window.__DRISHYAM_ENGINE, { timeout: 15000 });
        // Interact with the UI, load shaders, or trigger render modes
      }
    }
    ```
-3. Run `npm run docs:screenshots`.
+3. Run `npm run docs:screenshots` from the repository root.
 4. Commit the new image asset under `assets/screenshots/` and the updated `README.md`.

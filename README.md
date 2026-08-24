@@ -144,8 +144,9 @@ See [**`docs/editor-feature-roadmap.md`**](docs/editor-feature-roadmap.md) for d
 Contributions are welcome! Please feel free to open an issue or submit a pull request.
 
 ### Adding Features & Visuals
-When implementing a new visual feature or shader pass, add a scenario recipe to `visual/readme-scenarios.mjs` and run:
+When implementing a new visual feature or shader pass, add a scenario recipe to `visual/readme-scenarios.mjs` and run (from the repository root in a separate terminal):
 ```bash
+# In the repository root:
 npm run docs:screenshots
 ```
 This will automatically capture 2x retina screenshots and update the README gallery.

@@ -12,7 +12,7 @@ export const readmeScenarios = [
     description: 'Clean, distraction-free 3D canvas viewport with floating glass control pill and live performance stats.',
     viewport: { width: 1280, height: 800 },
     async run(page) {
-      await page.waitForFunction(() => !!window.__DRISHYAM_ENGINE);
+      await page.waitForFunction(() => !!window.__DRISHYAM_ENGINE, { timeout: 15000 });
       await page.waitForTimeout(500);
     },
   },
@@ -23,8 +23,8 @@ export const readmeScenarios = [
     description: 'Comprehensive 3-panel layout: interactive File Explorer on the left, real-time 3D Viewport in the center, and live Code Editor with syntax highlighting on the right.',
     viewport: { width: 1280, height: 800 },
     async run(page) {
-      await page.waitForFunction(() => !!window.__DRISHYAM_ENGINE);
-      // Switch to Studio Edit Mode via UI or keypress
+      await page.waitForFunction(() => !!window.__DRISHYAM_ENGINE, { timeout: 15000 });
+      // Switch to Studio Edit Mode via UI or fallback keypress
       const editBtn = page.locator('button[title*="Edit Mode"], button:has-text("Edit Studio")');
       if (await editBtn.count() > 0) {
         await editBtn.first().click({ timeout: 2000 }).catch(() => {});
@@ -44,11 +44,10 @@ export const readmeScenarios = [
     description: 'Progressive Monte Carlo path tracing with soft area lighting, color bleeding, and progressive SPP accumulation.',
     viewport: { width: 1280, height: 800 },
     async run(page) {
-      await page.waitForFunction(() => !!window.__DRISHYAM_RAY_TEST || !!window.__DRISHYAM_ENGINE);
+      // Explicitly wait for visual test API initialization
+      await page.waitForFunction(() => !!window.__DRISHYAM_RAY_TEST, { timeout: 15000 });
       await page.evaluate(async () => {
-        if (window.__DRISHYAM_RAY_TEST) {
-          await window.__DRISHYAM_RAY_TEST.loadCornell('raytrace-gpu');
-        }
+        await window.__DRISHYAM_RAY_TEST.loadCornell('raytrace-gpu');
       });
       await page.waitForTimeout(1200);
     },
@@ -60,11 +59,10 @@ export const readmeScenarios = [
     description: 'G-Buffer deferred rasterization combined with GPU compute ray-traced shadow occlusion rays.',
     viewport: { width: 1280, height: 800 },
     async run(page) {
-      await page.waitForFunction(() => !!window.__DRISHYAM_RAY_TEST || !!window.__DRISHYAM_ENGINE);
+      // Explicitly wait for visual test API initialization
+      await page.waitForFunction(() => !!window.__DRISHYAM_RAY_TEST, { timeout: 15000 });
       await page.evaluate(async () => {
-        if (window.__DRISHYAM_RAY_TEST) {
-          await window.__DRISHYAM_RAY_TEST.setRenderMode('hybrid-shadows');
-        }
+        await window.__DRISHYAM_RAY_TEST.setRenderMode('hybrid-shadows');
       });
       await page.waitForTimeout(800);
     },
@@ -76,7 +74,7 @@ export const readmeScenarios = [
     description: 'Real-time neural point-cloud rendering with GPU radix depth sorting and spherical harmonics.',
     viewport: { width: 1280, height: 800 },
     async run(page) {
-      await page.waitForFunction(() => !!window.__DRISHYAM_ENGINE);
+      await page.waitForFunction(() => !!window.__DRISHYAM_ENGINE, { timeout: 15000 });
       await page.waitForTimeout(500);
     },
   },
@@ -87,8 +85,7 @@ export const readmeScenarios = [
     description: 'Quick-access command launcher (⌘K / Ctrl+K) for switching layouts, loading assets, toggling render backends, and debugging.',
     viewport: { width: 1280, height: 800 },
     async run(page) {
-      await page.waitForFunction(() => !!window.__DRISHYAM_ENGINE);
-      // Open command palette via portable shortcut or UI
+      await page.waitForFunction(() => !!window.__DRISHYAM_ENGINE, { timeout: 15000 });
       const cmdBtn = page.locator('button[title*="Command Palette"], button:has-text("⌘K")');
       if (await cmdBtn.count() > 0) {
         await cmdBtn.first().click({ timeout: 2000 }).catch(() => {});
