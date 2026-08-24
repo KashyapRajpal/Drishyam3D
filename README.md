@@ -26,36 +26,18 @@ Drishyam3D is a lightweight, browser-based 3D scene editor built with **WebGPU**
 ## Screenshots & Demo
 
 <!-- AUTO_SCREENSHOT_GALLERY:START -->
-### Minimal View Mode
-> **`UI & Workspace`** — Clean, distraction-free 3D viewport featuring the Drishyam3D logo-textured cube, floating glass control bar, and interactive Quick Guide & Legend HUD.
+<div align="center">
 
-![Minimal View Mode](assets/screenshots/minimal-view-mode.png)
+| Workspace / Mode | Feature Description |
+| :--- | :--- |
+| **Minimal View Mode**<br><br><img src="assets/screenshots/minimal-view-mode.png" width="420" alt="Minimal View Mode"/> | Clean, distraction-free 3D canvas viewport with floating glass control pill and live performance stats. |
+| **Studio Edit Workspace**<br><br><img src="assets/screenshots/studio-edit-mode.png" width="420" alt="Studio Edit Workspace"/> | Comprehensive 3-panel layout: interactive File Explorer on the left, real-time 3D Viewport in the center, and live Code Editor with syntax highlighting on the right. |
+| **Cornell Box GPU Path Tracing**<br><br><img src="assets/screenshots/cornell-box-raytrace.png" width="420" alt="Cornell Box GPU Path Tracing"/> | Progressive Monte Carlo path tracing with soft area lighting, color bleeding, and progressive SPP accumulation. |
+| **glTF Rasterization + Ray-Traced Soft Shadows**<br><br><img src="assets/screenshots/hybrid-shadows-gltf.png" width="420" alt="glTF Rasterization + Ray-Traced Soft Shadows"/> | G-Buffer deferred rasterization combined with GPU compute ray-traced shadow occlusion rays. |
+| **3D Gaussian Splatting**<br><br><img src="assets/screenshots/drishyam-splat-render.png" width="420" alt="3D Gaussian Splatting"/> | Real-time neural point-cloud rendering with GPU radix depth sorting and spherical harmonics. |
+| **Universal Command Palette**<br><br><img src="assets/screenshots/command-palette.png" width="420" alt="Universal Command Palette"/> | Quick-access command launcher (⌘K / Ctrl+K) for switching layouts, loading assets, toggling render backends, and debugging. |
 
-### Studio Edit Mode
-> **`Code Editor & IDE`** — Full-featured 3D IDE workspace with a categorised top menu bar, live file tree explorer, real-time 3D WebGPU canvas, and multi-tab WGSL/GLSL CodeMirror editor.
-
-![Studio Edit Mode](assets/screenshots/studio-edit-mode.png)
-
-### GPU Path Tracing (Cornell Box)
-> **`Ray Tracing`** — Real-time progressive path tracing with multi-bounce diffuse global illumination, soft color bleeding, and live SPP accumulation HUD.
-
-![GPU Path Tracing (Cornell Box)](assets/screenshots/cornell-box-raytrace.png)
-
-### Hybrid Ray-Traced Shadows (glTF)
-> **`Hybrid Rendering`** — Combines high-performance rasterized G-buffer primary visibility with real-time hardware ray-traced hard shadows on complex glTF geometry.
-
-![Hybrid Ray-Traced Shadows (glTF)](assets/screenshots/hybrid-shadows-gltf.png)
-
-### 3D Gaussian Splatting Rendering
-> **`Neural Rendering`** — Neural 3D Gaussian Splat scenes (.ply format) rendered with per-frame WebGPU compute-shader bitonic depth sorting, premultiplied alpha blending, and 360° orbital camera control.
-
-![3D Gaussian Splatting Rendering](assets/screenshots/drishyam-splat-render.png)
-
-### Command Palette (Cmd+K)
-> **`Productivity`** — Fast keyboard-first command palette over a frosted glass backdrop for instant switching between shaders, scenes, render engines, and settings.
-
-![Command Palette (Cmd+K)](assets/screenshots/command-palette.png)
-
+</div>
 <!-- AUTO_SCREENSHOT_GALLERY:END -->
 
 For a live demo, visit: [**https://kashyaprajpal.github.io/Drishyam3D/**](https://kashyaprajpal.github.io/Drishyam3D/)
@@ -116,8 +98,6 @@ The editor is divided into three main panels and a top menu bar.
     *   **Code Editor**: A full-featured editor for GLSL (shaders) and JavaScript.
     *   **Footer**: Contains **Apply** and **Reset** buttons, an **Auto Refresh** checkbox, and an error console.
 
-### Menu Bar
-
 ## Workspace & Workflows
 
 ### 1. Minimal View Mode
@@ -144,15 +124,17 @@ See [**`docs/editor-feature-roadmap.md`**](docs/editor-feature-roadmap.md) for d
 
 | Milestone | Capability | Status |
 | :--- | :--- | :---: |
-| **Phase 1** | **Modern UI Overhaul & Dual Modes** (Minimal View + Studio IDE) | ✅ Completed |
-| **Phase 2** | **Dual Engine Pipeline** (WebGPU Compute + WebGL Fallback) | ✅ Completed |
+| **Phase 0** | **Stats & Diagnostics Overlay** | ✅ Completed |
+| **Phase 1** | **Local File System Access API** (`⌘O`, `⌘S`) | ✅ Completed |
+| **Phase 2** | **Texture & Logo Mapping** | ✅ Completed |
 | **Phase 3a** | **3D Gaussian Splatting** (GPU Bitonic Depth Sorting & Alpha Blending) | ✅ Completed |
-| **Phase 3b** | **Hardware Ray Tracing** (Progressive GPU/CPU Path Tracing + Hybrid Shadows) | ✅ Completed |
-| **Phase 3c** | **Command Palette & Native Disk Access** (`⌘K`, `⌘O`, `⌘S`) | ✅ Completed |
-| **Phase 3d** | **Automated High-DPI Screenshot & README Sync Engine** | ✅ Completed |
+| **Phase 3b** | **Hardware Ray Tracing & Hybrid Shadows** (GPU/CPU Path Tracing + Deferred Ray Occlusion) | ✅ Completed |
+| **Phase 3c** | **UI Modernization & Command Palette** (`⌘K`, Minimal View + Studio Edit) | ✅ Completed |
+| **Phase 3d** | **Automated High-DPI Screenshot & README Sync Pipeline** | ✅ Completed |
+| **Phase 6a** | **Textured & Colored PLY Mesh Loader** | ✅ Completed |
 | **Phase 4** | **Post-Processing Effects SDK** (Offscreen FBOs, Blur, Depth of Field) | ⏳ Next Up |
-| **Phase 5** | **Multi-Texture PBR Materials** (Albedo, Normal, Roughness, Metallic) | 📅 Planned |
-| **Phase 6** | **Expanded Neural Containers** (Niantic `.spz`, Binary glTF `.glb`) | 📅 Planned |
+| **Phase 5** | **Multi-Texture PBR Materials & Dual-Pass Scissor** | 📅 Planned |
+| **Phase 6b** | **Expanded Neural Containers** (Niantic `.spz`, Binary glTF `.glb`) | 📅 Planned |
 | **Phase 7** | **Cinematic Camera Orbit & 4K WebM Canvas Recording** | 📅 Planned |
 
 ---

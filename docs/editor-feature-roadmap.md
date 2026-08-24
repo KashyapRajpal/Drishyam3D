@@ -11,14 +11,13 @@ Comprehensive architecture and delivery roadmap for **Drishyam3D** — tracking 
 | **Phase 0** | **Stats & Diagnostics Overlay** | ✅ Completed | Real-time EMA FPS, frame times, triangle/splat counts, backend indicators. |
 | **Phase 1** | **Local File System Access API** | ✅ Completed | Native `Cmd+O` / `Cmd+S` disk save/load for WGSL/GLSL shaders and JS scene scripts. |
 | **Phase 2** | **Texture & Logo Mapping** | ✅ Completed | Drishyam3D logo mapping across 3D primitives; single-texture upload support. |
-| **Phase 3** | **Ray Tracing & Hybrid Shadows** | ✅ Completed | CPU/GPU Progressive Path Tracing (Cornell Box) + Real-time Hybrid Ray-Traced Shadows. |
 | **Phase 3a**| **3D Gaussian Splatting (3DGS)** | ✅ Completed | Neural `.ply` ingestion, WebGPU on-GPU bitonic depth sorting, alpha blending. |
-| **Phase 3b**| **Split-Screen Compare Slider** | ✅ Completed | Interactive wipe divider overlay (`CompareSlider.jsx`) for before/after comparison. |
-| **Phase 3c**| **UI Modernization & Dual Modes** | ✅ Completed | Minimal View Mode (floating glass HUD) + Studio Edit Mode (tabbed CodeMirror IDE). |
+| **Phase 3b**| **Hardware Ray Tracing & Hybrid Shadows** | ✅ Completed | CPU/GPU Progressive Path Tracing (Cornell Box) + Real-time Hybrid Ray-Traced Shadows. |
+| **Phase 3c**| **UI Modernization & Command Palette** | ✅ Completed | Minimal View Mode (floating glass HUD) + Studio Edit Mode (tabbed CodeMirror IDE) + Command Palette (`⌘K`). |
 | **Phase 3d**| **Automated Doc & Screenshot System**| ✅ Completed | Headless WebGPU Playwright screenshot runner & automated README sync (`npm run docs:screenshots`). |
 | **Phase 6a**| **Textured & Colored PLY Mesh Loader**| ✅ Completed | Header inspection for 3DGS vs mesh, Artec UV indexing, uint32 index buffer support. |
 | **Phase 4** | **Post-Processing Effects SDK** | ⏳ Next Up | Offscreen FBO pipeline, shader-pass authoring, Gaussian Blur & Depth of Field (DoF). |
-| **Phase 5** | **Multi-Texture PBR Materials** | 📅 Planned | Albedo, Normal, Roughness, Metallic texture slots with PBR WGSL/GLSL shaders. |
+| **Phase 5** | **Multi-Texture PBR Materials & Dual-Pass Scissor** | 📅 Planned | Albedo, Normal, Roughness, Metallic slots + Scissor split comparison. |
 | **Phase 6b**| **Binary glTF (.glb) & Niantic .spz** | 📅 Planned | In-memory 12-byte chunk reader for `.glb` and gzip decompression for `.spz` neural splats. |
 | **Phase 7** | **Camera Orbit Animation & 4K Recording**| 📅 Planned | Spline-based camera paths and high-res WebM canvas export. |
 

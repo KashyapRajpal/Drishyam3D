@@ -24,12 +24,16 @@ export const readmeScenarios = [
     viewport: { width: 1280, height: 800 },
     async run(page) {
       await page.waitForFunction(() => !!window.__DRISHYAM_ENGINE);
-      await page.click('button[title*="Edit Mode"], button:has-text("Edit Studio")').catch(async () => {
+      // Switch to Studio Edit Mode via UI or keypress
+      const editBtn = page.locator('button[title*="Edit Mode"], button:has-text("Edit Studio")');
+      if (await editBtn.count() > 0) {
+        await editBtn.first().click({ timeout: 2000 }).catch(() => {});
+      } else {
         await page.keyboard.press('Control+k');
         await page.waitForTimeout(200);
         await page.keyboard.type('Switch to Edit');
         await page.keyboard.press('Enter');
-      });
+      }
       await page.waitForTimeout(500);
     },
   },
@@ -84,7 +88,13 @@ export const readmeScenarios = [
     viewport: { width: 1280, height: 800 },
     async run(page) {
       await page.waitForFunction(() => !!window.__DRISHYAM_ENGINE);
-      await page.keyboard.press('Meta+k').catch(() => page.keyboard.press('Control+k'));
+      // Open command palette via portable shortcut or UI
+      const cmdBtn = page.locator('button[title*="Command Palette"], button:has-text("⌘K")');
+      if (await cmdBtn.count() > 0) {
+        await cmdBtn.first().click({ timeout: 2000 }).catch(() => {});
+      } else {
+        await page.keyboard.press('Control+k');
+      }
       await page.waitForTimeout(300);
     },
   },
