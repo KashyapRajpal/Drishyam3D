@@ -127,8 +127,7 @@ depth sort, instanced billboard splatting. Backend switch in the existing Settin
 **Phase 3b (follow-up):** Full SH (view-dependent color), GPU radix sort for large scenes,
 `.splat`/compressed formats, sort-skip optimization on small camera deltas.
 
-**Phase 3c (parked):** Hardware-accelerated ray tracing — pending stable WebGPU ray-query
-support.
+**Phase 3c (implemented):** Multi-threaded CPU reference path tracer and WebGPU compute-shader path tracer (Cornell Box) + real-time hybrid ray-traced shadows on glTF with BLAS/TLAS acceleration.
 
 ### Pluggable WASM renderer backend (architecture sketch — deferred)
 
