@@ -12,6 +12,16 @@ export function TopMenuBar({
   splatLoaded,
   splatDebug,
   setSplatDebug,
+  splatSort,
+  setSplatSort,
+  splatReduction,
+  setSplatReduction,
+  splatRenderMode,
+  setSplatRenderMode,
+  shDegree,
+  setShDegree,
+  flipSplatY,
+  setFlipSplatY,
   showStats,
   setShowStats,
   showExplorer,
@@ -191,6 +201,69 @@ export function TopMenuBar({
 
               {splatLoaded && (
                 <>
+                  <div className="menu-separator" />
+                  <div className="menu-section-header">Splat Ordering & Culling</div>
+                  {[
+                    { axis: 'Sort', value: splatSort, set: setSplatSort, opts: [
+                        { k: 'bitonic', l: 'Bitonic' },
+                        { k: 'radix', l: 'Radix' },
+                    ] },
+                    { axis: 'Reduction', value: splatReduction, set: setSplatReduction, opts: [
+                        { k: 'none', l: 'None' },
+                        { k: 'culled', l: 'Culled' },
+                        { k: 'coarse', l: 'Coarse', soon: true },
+                        { k: 'lod', l: 'LOD', soon: true },
+                    ] },
+                    { axis: 'Render', value: splatRenderMode, set: setSplatRenderMode, opts: [
+                        { k: 'instanced', l: 'Instanced' },
+                        { k: 'tile', l: 'Tile' },
+                    ] },
+                  ].map((row) => (
+                    <div key={row.axis} className="splat-matrix-row">
+                      <span className="splat-matrix-axis">{row.axis}</span>
+                      <div className="splat-matrix-options">
+                        {row.opts.map((o) => o.soon ? (
+                          <span key={o.k} title="Coming soon" className="splat-matrix-btn disabled">{o.l}</span>
+                        ) : (
+                          <button
+                            key={o.k}
+                            type="button"
+                            className={`splat-matrix-btn ${row.value === o.k ? 'active' : ''}`}
+                            onClick={(e) => { e.preventDefault(); row.set(o.k) }}
+                          >{o.l}</button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+
+                  <div className="menu-separator" />
+                  <div className="menu-section-header">Spherical Harmonics (SH)</div>
+                  <div className="splat-matrix-row">
+                    <span className="splat-matrix-axis">Degree</span>
+                    <div className="splat-matrix-options">
+                      {[0, 1, 2, 3].map((deg) => (
+                        <button
+                          key={deg}
+                          type="button"
+                          className={`splat-matrix-btn ${shDegree === deg ? 'active' : ''}`}
+                          onClick={(e) => { e.preventDefault(); setShDegree(deg) }}
+                        >
+                          {deg === 0 ? '0 (Diff)' : deg}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="menu-separator" />
+                  <div className="menu-section-header">Splat Orientation</div>
+                  <a
+                    href="#"
+                    className={flipSplatY ? 'active-item' : ''}
+                    onClick={(e) => { e.preventDefault(); setFlipSplatY(!flipSplatY) }}
+                  >
+                    {flipSplatY ? '☑️ Flip Splat Y-Axis' : '☐ Flip Splat Y-Axis'}
+                  </a>
+
                   <div className="menu-separator" />
                   <div className="menu-section-header">Splat Debug</div>
                   <a

@@ -348,6 +348,21 @@ export default function App() {
   }, [engineReady, splatRenderMode, splatLoaded])
 
   useEffect(() => {
+    if (!engineReady || !engineRef.current) return
+    engineRef.current.setSplatSort?.(splatSort)
+  }, [engineReady, splatSort, splatLoaded])
+
+  useEffect(() => {
+    if (!engineReady || !engineRef.current) return
+    engineRef.current.setSplatReduction?.(splatReduction)
+  }, [engineReady, splatReduction, splatLoaded])
+
+  useEffect(() => {
+    if (!engineReady || !engineRef.current) return
+    engineRef.current.setSplatFlipY?.(flipSplatY)
+  }, [engineReady, flipSplatY, splatLoaded])
+
+  useEffect(() => {
     const progressive = renderMode === 'raytrace-cpu' || renderMode === 'raytrace-gpu'
     if ((!showStats && !progressive) || !engineReady) return
     const engine = renderMode === 'raytrace-cpu' ? rayCoordinatorRef.current : engineRef.current
@@ -757,6 +772,18 @@ export default function App() {
     { id: 'save-file', label: 'Save Active File to Disk', category: 'File', shortcut: '⌘S', run: handleSaveActiveFile },
     { id: 'backend-gpu', label: 'Switch Renderer to WebGPU', category: 'Engine', run: () => setBackend('webgpu') },
     { id: 'backend-gl', label: 'Switch Renderer to WebGL', category: 'Engine', run: () => setBackend('webgl') },
+    { id: 'splat-sort-bitonic', label: 'Splat Sort: GPU Bitonic', category: 'Splatting', run: () => setSplatSort('bitonic') },
+    { id: 'splat-sort-radix', label: 'Splat Sort: GPU Radix', category: 'Splatting', run: () => setSplatSort('radix') },
+    { id: 'splat-reduct-none', label: 'Splat Culling: None', category: 'Splatting', run: () => setSplatReduction('none') },
+    { id: 'splat-reduct-culled', label: 'Splat Culling: Frustum / Grid Culled', category: 'Splatting', run: () => setSplatReduction('culled') },
+    { id: 'splat-render-instanced', label: 'Splat Renderer: Instanced Quads', category: 'Splatting', run: () => setSplatRenderMode('instanced') },
+    { id: 'splat-render-tile', label: 'Splat Renderer: Tile-Based Compute', category: 'Splatting', run: () => setSplatRenderMode('tile') },
+    { id: 'splat-sh-0', label: 'Splat Spherical Harmonics: Degree 0 (Diffuse)', category: 'Splatting', run: () => setShDegree(0) },
+    { id: 'splat-sh-3', label: 'Splat Spherical Harmonics: Degree 3 (Full View-Dependent)', category: 'Splatting', run: () => setShDegree(3) },
+    { id: 'splat-flip-y', label: 'Splat Orientation: Toggle Flip Y-Axis', category: 'Splatting', run: () => setFlipSplatY((f) => !f) },
+    { id: 'splat-debug-off', label: 'Splat Debug: Off (Full Gaussian)', category: 'Splatting', run: () => setSplatDebug('off') },
+    { id: 'splat-debug-points', label: 'Splat Debug: Points (Centers)', category: 'Splatting', run: () => setSplatDebug('points') },
+    { id: 'splat-debug-sorted', label: 'Splat Debug: Points (Sorted Depth)', category: 'Splatting', run: () => setSplatDebug('points-sorted') },
     { id: 'toggle-stats', label: 'Toggle Real-Time Performance HUD', category: 'View', run: () => setShowStats((s) => !s) },
     { id: 'reset-scene', label: 'Reset 3D Scene', category: 'Scene', run: handleResetScene },
     { id: 'help-shortcuts', label: 'View Keyboard Shortcuts', category: 'Help', run: () => setIsShortcutsOpen(true) },
@@ -850,6 +877,16 @@ export default function App() {
           splatLoaded={splatLoaded}
           splatDebug={splatDebug}
           setSplatDebug={setSplatDebug}
+          splatSort={splatSort}
+          setSplatSort={setSplatSort}
+          splatReduction={splatReduction}
+          setSplatReduction={setSplatReduction}
+          splatRenderMode={splatRenderMode}
+          setSplatRenderMode={setSplatRenderMode}
+          shDegree={shDegree}
+          setShDegree={setShDegree}
+          flipSplatY={flipSplatY}
+          setFlipSplatY={setFlipSplatY}
           showStats={showStats}
           setShowStats={setShowStats}
           showExplorer={showExplorer}
