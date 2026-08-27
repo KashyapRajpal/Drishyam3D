@@ -256,13 +256,13 @@ export function TopMenuBar({
 
                   <div className="menu-separator" />
                   <div className="menu-section-header">Splat Orientation</div>
-                  <a
-                    href="#"
-                    className={flipSplatY ? 'active-item' : ''}
-                    onClick={(e) => { e.preventDefault(); setFlipSplatY(!flipSplatY) }}
+                  <button
+                    type="button"
+                    className={`dropdown-item-btn ${flipSplatY ? 'active-item' : ''}`}
+                    onClick={() => setFlipSplatY(!flipSplatY)}
                   >
-                    {flipSplatY ? '☑️ Flip Splat Y-Axis' : '☐ Flip Splat Y-Axis'}
-                  </a>
+                    <span>{flipSplatY ? '☑️ Flip Splat Y-Axis' : '☐ Flip Splat Y-Axis'}</span>
+                  </button>
 
                   <div className="menu-separator" />
                   <div className="menu-section-header">Splat Debug</div>

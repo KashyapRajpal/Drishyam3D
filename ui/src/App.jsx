@@ -779,6 +779,8 @@ export default function App() {
     { id: 'splat-render-instanced', label: 'Splat Renderer: Instanced Quads', category: 'Splatting', run: () => setSplatRenderMode('instanced') },
     { id: 'splat-render-tile', label: 'Splat Renderer: Tile-Based Compute', category: 'Splatting', run: () => setSplatRenderMode('tile') },
     { id: 'splat-sh-0', label: 'Splat Spherical Harmonics: Degree 0 (Diffuse)', category: 'Splatting', run: () => setShDegree(0) },
+    { id: 'splat-sh-1', label: 'Splat Spherical Harmonics: Degree 1 (First-Order)', category: 'Splatting', run: () => setShDegree(1) },
+    { id: 'splat-sh-2', label: 'Splat Spherical Harmonics: Degree 2 (Second-Order)', category: 'Splatting', run: () => setShDegree(2) },
     { id: 'splat-sh-3', label: 'Splat Spherical Harmonics: Degree 3 (Full View-Dependent)', category: 'Splatting', run: () => setShDegree(3) },
     { id: 'splat-flip-y', label: 'Splat Orientation: Toggle Flip Y-Axis', category: 'Splatting', run: () => setFlipSplatY((f) => !f) },
     { id: 'splat-debug-off', label: 'Splat Debug: Off (Full Gaussian)', category: 'Splatting', run: () => setSplatDebug('off') },
